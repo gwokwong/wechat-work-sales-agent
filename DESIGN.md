@@ -1,14 +1,3 @@
----
-AIGC:
-    Label: "1"
-    ContentProducer: 001191440300708461136T1XGW3
-    ProduceID: 0cb96a239235a576bd3237f47934315e_e11d1345a81e11f18ba4525400f8a581
-    ReservedCode1: pW2i1VIxCuqlNT+5oFkh9WXsLvzOyspEr0M+bFWt/nt/kJQZUw6PKUARFt/0Vg9rMOeatCnHpBg8gnLgxM/5EIj2DGdf9iB0xPW1IgpDXT1dQ9JCBqfjmMq0Gh+sw50XXvOATZlv5OaxCyU1Rq54nNVlTPYB5rp7eXSDYqbIMhYjEYm5DVsu5jOuiU4=
-    ContentPropagator: 001191440300708461136T1XGW3
-    PropagateID: 0cb96a239235a576bd3237f47934315e_e11d1345a81e11f18ba4525400f8a581
-    ReservedCode2: pW2i1VIxCuqlNT+5oFkh9WXsLvzOyspEr0M+bFWt/nt/kJQZUw6PKUARFt/0Vg9rMOeatCnHpBg8gnLgxM/5EIj2DGdf9iB0xPW1IgpDXT1dQ9JCBqfjmMq0Gh+sw50XXvOATZlv5OaxCyU1Rq54nNVlTPYB5rp7eXSDYqbIMhYjEYm5DVsu5jOuiU4=
----
-
 # DESIGN — 企业微信销售 Agent 设计文档
 
 > 版本：v0.1（M0 骨架演示版）　状态：设计定稿 + 骨架实现可运行
@@ -311,4 +300,3 @@ public interface QuoteService {
 
 ## 定制或商务联系
 QQ：467643531
-*（内容由AI生成，仅供参考）*

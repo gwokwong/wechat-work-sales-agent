@@ -1,14 +1,3 @@
----
-AIGC:
-    Label: "1"
-    ContentProducer: 001191440300708461136T1XGW3
-    ProduceID: 0cb96a239235a576bd3237f47934315e_e01fa281a81e11f18ba4525400f8a581
-    ReservedCode1: j0NhcP8vMlqwJ0bOVxPSNRvb6Ke3WdXZiL6fgWk2sNNkfAj9kvV6JOHyWu61tsaCoLLV8LnnV5GNwptCeJR2tibcZdGhMBTiqyGOliRTVEzKEDVX1AE7AYqFTB/FyYAO2KQ45ByWQgPefrVByeF/0zZ+YPo2E/2lNyBl6ktCyleXtFYcDhbFFY/lFN4=
-    ContentPropagator: 001191440300708461136T1XGW3
-    PropagateID: 0cb96a239235a576bd3237f47934315e_e01fa281a81e11f18ba4525400f8a581
-    ReservedCode2: j0NhcP8vMlqwJ0bOVxPSNRvb6Ke3WdXZiL6fgWk2sNNkfAj9kvV6JOHyWu61tsaCoLLV8LnnV5GNwptCeJR2tibcZdGhMBTiqyGOliRTVEzKEDVX1AE7AYqFTB/FyYAO2KQ45ByWQgPefrVByeF/0zZ+YPo2E/2lNyBl6ktCyleXtFYcDhbFFY/lFN4=
----
-
 # 企业微信销售 Agent（WeChat Sales Agent）
 
 基于**企业微信官方会话存档方案**的单体 Spring Boot 项目骨架与设计文档。
@@ -212,4 +201,3 @@ wechat-sales-agent/
 
 ## 定制或商务联系 
 QQ：467643531
-*（内容由AI生成，仅供参考）*
