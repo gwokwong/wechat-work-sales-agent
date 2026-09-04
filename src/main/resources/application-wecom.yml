@@ -1,0 +1,73 @@
+# ============================================================
+# M1 真实企业微信接入 Profile（默认不激活！）
+#
+# 接入真实环境前，先在企微管理后台准备（详见 README/DESIGN M1「剩余真实接入步骤」）：
+#   1. 企业 corpId（我的企业 → 企业信息）
+#   2. 会话内容存档 secret（管理端「安全与管理 → 管理工具 → 会话内容存档」，
+#      需开启接口、配置可信 IP、上传 RSA 公钥并下载私钥）
+#   3. 应用 agentId / secret（自建应用：客户联系权限 + 员工可发送客户消息）
+#   4. 回调 Token / EncodingAESKey（应用「接收消息服务器配置」生成，需公网可达 URL）
+#   5. 消息服务器可信 IP（服务器出口 IP）
+#
+# 启动方式（与 mysql 组合，存档与状态需持久化）：
+#   mvn spring-boot:run -Dspring-boot.run.profiles=mysql,wecom
+#
+# ⚠️ 安全提示：session-archive-private-key / app-secret / session-secret 请优先用
+#    环境变量注入（如 ${WECOM_PRIVATE_KEY_PEM}），不要把生产私钥写进 git。
+# ⚠️ 未填真实值时：本 profile 可加载，WeComChannel 回调返回失败提示、定时拉取自
+#    动跳过（仅一次 WARN），不会启动报错刷屏。
+# ============================================================
+
+app:
+  # 人工审批仍建议 MANUAL：真实发送前由销售人工把关
+  approval-mode: MANUAL
+
+  channel:
+    # 真实企微通道
+    active: wecom
+
+  mock:
+    # 关闭 M0 演示自动注入，避免与真实消息混流
+    enabled: false
+
+  wecom:
+    # 总开关：true 才注册 WeComChannel / 回调 Controller / 存档定时拉取
+    enabled: true
+
+    # 企业 corpId
+    corp-id: YOUR_CORP_ID
+    # 会话内容存档 secret（接口型，用于 gettoken 拉取 getchatdata）
+    session-secret: YOUR_SESSION_ARCHIVE_SECRET
+    # 自建应用 secret（用于 message/send 应用消息发送）
+    app-secret: YOUR_APP_SECRET
+    # 应用 AgentId（数字）
+    agent-id: 1000002
+
+    # 回调配置（应用「接收消息服务器配置」里的 Token 与 EncodingAESKey，43 位）
+    callback-token: YOUR_CALLBACK_TOKEN
+    callback-aes-key: YOUR_CALLBACK_AES_KEY
+
+    # 会话存档数据解密私钥（PKCS1 或 PKCS8 PEM 文本，换行用 \n 或环境变量注入）
+    session-archive-private-key: ${WECOM_PRIVATE_KEY_PEM:YOUR_PRIVATE_KEY_PEM}
+
+    # ---- 会话存档定时拉取 ----
+    # 默认 true（本 profile 下自动增量拉取）；无凭据时自动跳过
+    archive-pull-enabled: true
+    archive-pull-limit: 1000
+    # 应用启动后 10s 首拉，之后每 60s 增量拉一次
+    archive-pull-initial-delay-ms: 10000
+    archive-pull-fixed-delay-ms: 60000
+
+    # ---- 方向识别辅助（按需调整）----
+    # 企业内部成员 userid（可选；留空则用 external-id-prefixes 启发式判断）
+    internal-user-ids: []
+    # 企微外部联系人 id 前缀：微信用户=wm、企业微信外部=wo 开头等
+    external-id-prefixes:
+      - wm
+      - wo
+      - wxid_
+      - wx_
+    # external_userid → 企微成员 userid 映射（message/send 的 touser；示例仅格式演示，
+    # 真实映射请按「员工-客户」关系维护，或使用「企业微信客服 send_msg」等其他外发通道）
+    external-to-userid:
+      # wmAAAAAAAAAAAAAAAA: zhangsan

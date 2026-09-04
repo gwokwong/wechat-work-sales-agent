@@ -4,6 +4,7 @@ import com.example.wechatsales.domain.QuoteRequest;
 import com.example.wechatsales.repository.QuoteRequestRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -13,10 +14,12 @@ import java.time.format.DateTimeFormatter;
 /**
  * MockQuoteService：报价 SPI 的演示实现。
  * 不真实对接业务系统，生成带时间戳的报价单号与测算金额并落库。
- * M1 阶段将替换为调用内部报价中心/CRM 的真实实现。
+ * 当 {@code app.quote.http.enabled=true}（真实报价适配器 HttpQuoteService 启用）时本实现自动停用，
+ * 保证容器内同一时间只有一个 QuoteService 实现。
  */
 @Slf4j
 @Service
+@ConditionalOnProperty(prefix = "app.quote.http", name = "enabled", havingValue = "false", matchIfMissing = true)
 @RequiredArgsConstructor
 public class MockQuoteService implements QuoteService {
 

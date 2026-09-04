@@ -4,7 +4,9 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 应用自定义配置（prefix=app）。
@@ -21,6 +23,24 @@ public class AppProperties {
     private Mock mock = new Mock();
     private Compliance compliance = new Compliance();
     private Wecom wecom = new Wecom();
+    private Quote quote = new Quote();
+
+    /** 真实报价系统 HTTP 适配配置（app.quote.http.*） */
+    @Data
+    public static class Quote {
+        private Http http = new Http();
+    }
+
+    /** HTTP 报价通道：enabled=true 时注册 HttpQuoteService（MockQuoteService 自动停用） */
+    @Data
+    public static class Http {
+        /** true=对接真实报价系统；false=使用 MockQuoteService 演示实现 */
+        private boolean enabled = false;
+        /** 内部报价系统根地址，如 http://quote.internal.example.com */
+        private String baseUrl = "";
+        /** 调用报价系统所需鉴权 Key（建议环境变量注入），适配器以 X-API-Key 头发送 */
+        private String apiKey = "";
+    }
 
     /** 通道配置 */
     @Data
@@ -62,6 +82,9 @@ public class AppProperties {
     /** 真实企微接入配置（M1 阶段使用，占位） */
     @Data
     public static class Wecom {
+        /** 总开关：false 时 WeComChannel / 回调 Controller / 存档拉取均不启用（启动不报错） */
+        private boolean enabled = false;
+
         private String corpId = "";
         private String sessionSecret = "";
         private String callbackToken = "";
@@ -69,5 +92,45 @@ public class AppProperties {
         private String sessionArchivePrivateKey = "";
         private String agentId = "";
         private String appSecret = "";
+
+        // ---- 会话存档拉取 ----
+        /** 是否启用 @Scheduled 增量拉取（仅当 enabled=true 生效） */
+        private boolean archivePullEnabled = true;
+        /** 单次拉取 limit（官方上限 1000） */
+        private int archivePullLimit = 1000;
+        private long archivePullInitialDelayMs = 10_000L;
+        private long archivePullFixedDelayMs = 60_000L;
+
+        // ---- 消息方向识别辅助 ----
+        /** 企业内部成员 userid 列表（会话存档方向判断；留空则按 externalIdPrefixes 启发式判断） */
+        private List<String> internalUserIds = new ArrayList<>();
+        /** 企微外部联系人 id 常见前缀（wm=微信用户外部联系人 / wo=企业微信外部联系人 等） */
+        private List<String> externalIdPrefixes = new ArrayList<>(List.of("wm", "wo", "wxid_", "wx_"));
+
+        // ---- 外发映射 ----
+        /** external_userid → 企微成员 userid（message/send 的 touser）；缺失时按原值直发并告警 */
+        private Map<String, String> externalToUserid = new HashMap<>();
+
+        /** 解析 message/send 的 touser：优先映射表，否则原 external_userid */
+        public String resolveTouser(String externalUserId) {
+            String mapped = externalToUserid.get(externalUserId);
+            return mapped == null || mapped.isBlank() ? externalUserId : mapped;
+        }
+
+        /** 是否为企微外部联系人 id（用于会话存档消息方向判断） */
+        public boolean looksExternal(String id) {
+            if (id == null || id.isBlank()) {
+                return false;
+            }
+            if (internalUserIds.contains(id)) {
+                return false;
+            }
+            for (String prefix : externalIdPrefixes) {
+                if (id.startsWith(prefix)) {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 }

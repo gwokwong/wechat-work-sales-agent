@@ -1,40 +1,75 @@
 package com.example.wechatsales.channel;
 
 import com.example.wechatsales.config.AppProperties;
+import com.example.wechatsales.crypto.WXBizMsgCrypt;
+import com.example.wechatsales.domain.Message;
+import com.example.wechatsales.repository.MessageLogRepository;
 import jakarta.annotation.PostConstruct;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
- * WeComChannel：真实企业微信通道实现（占位）。
+ * WeComChannel：真实企业微信通道（M1 实现）。
  *
- * <p>M1 阶段接入清单（详见 DESIGN.md / README.md）：</p>
- * <ol>
- *   <li>配置 app.wecom.corp-id / session-secret / agent-id / app-secret；</li>
- *   <li>在企微管理后台配置"会话内容存档"回调 URL，本类提供
- *       {@code receiveCallback(...)} 供 Controller 调用；</li>
- *   <li>回调消息验签（Token + EncodingAESKey）、解密（RSA 私钥）、
- *       按 msgId 幂等后 publish 到 {@link MessageBus}；</li>
- *   <li>外发走企微"客户联系"发送应用消息接口，替换下方 {@link #send(OutboundMessage)} 内 TODO。</li>
- * </ol>
+ * <ul>
+ *   <li>外发：{@link #send(OutboundMessage)} 调用 {@link WeComApiClient#sendTextMessage}
+ *       （/cgi-bin/message/send 应用消息，touser 按 external_to_userid 映射解析）返回真实 msgid；</li>
+ *   <li>回调：{@link #verifyUrl}/{@link #receiveCallback} 供 {@code WeComCallbackController}
+ *       调用，验签 + 解密 + XML 解析后，以 msgId 幂等去重并异步投递 {@link MessageBus}；
+ *       ack 立即返回（5 秒硬约束），丢消息由会话存档拉取兜底；</li>
+ *   <li>configStatus：启动/管理端展示配置是否真实填写。</li>
+ * </ul>
  *
- * <p>当前为占位实现：不发起任何真实网络请求，避免误用造成资损。
- * 尝试在未接入真实配置时使用会抛出带说明的异常。</p>
+ * <p>仅在 {@code app.wecom.enabled=true} 时创建（默认 false：M0/Mock 链路不受影响，
+ * 未填真实配置时启动不报错，send 返回带原因的失败）。</p>
  */
 @Slf4j
 @Component("wecomChannel")
-@RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "app.wecom", name = "enabled", havingValue = "true")
 public class WeComChannel implements Channel {
 
     private final AppProperties appProperties;
+    private final WeComApiClient weComApiClient;
+    private final MessageBus messageBus;
+    private final MessageLogRepository messageLogRepository;
+    private final TaskExecutor wecomCallbackExecutor;
+
+    private WXBizMsgCrypt wxCrypt;
+
+    public WeComChannel(AppProperties appProperties,
+                        WeComApiClient weComApiClient,
+                        MessageBus messageBus,
+                        MessageLogRepository messageLogRepository,
+                        TaskExecutor wecomCallbackExecutor) {
+        this.appProperties = appProperties;
+        this.weComApiClient = weComApiClient;
+        this.messageBus = messageBus;
+        this.messageLogRepository = messageLogRepository;
+        this.wecomCallbackExecutor = wecomCallbackExecutor;
+    }
 
     @PostConstruct
     public void init() {
-        log.info("[WeComChannel] 已注册为真实企微通道（占位）。active=mock 时不会生效。");
+        AppProperties.Wecom w = appProperties.getWecom();
+        if (real(w.getCallbackToken()) && real(w.getCallbackAesKey()) && real(w.getCorpId())) {
+            try {
+                this.wxCrypt = new WXBizMsgCrypt(w.getCallbackToken(), w.getCallbackAesKey(), w.getCorpId());
+            } catch (Exception e) {
+                log.warn("[WeComChannel] 回调加解密初始化失败，回调将不可用: {}", e.getMessage());
+            }
+        } else {
+            log.warn("[WeComChannel] 回调 Token/EncodingAESKey/corpId 未配置完整，回调入口将返回失败提示");
+        }
+        log.info("[WeComChannel] 真实企微通道已启用。corpId={} 配置完整={}",
+                w.getCorpId(), weComApiClient.isConfigured());
     }
 
     @Override
@@ -44,49 +79,91 @@ public class WeComChannel implements Channel {
 
     @Override
     public SendResult send(OutboundMessage message) {
-        // TODO(M1): 调用企业微信「客户联系-发送应用消息」接口
-        //   1. 用 app.wecom.app-secret 换取 access_token；
-        //   2. POST https://qyapi.weixin.qq.com/cgi-bin/message/send
-        //      {touser: contactExternalId, msgtype: "text", agentid: agentId, text:{content}}
-        //   3. 使用返回的 msgid 作为 SendResult.messageId 用于审计；
-        //   4. 注意企微外发频率限制与超时重试策略。
-        throw new IllegalStateException(
-                "WeComChannel 尚未接入真实企微。请完成 M1 配置（corpId/secret/会话存档私钥等）并切换 app.channel.active=wecom。详见 README.md M1 步骤清单。");
+        if (!weComApiClient.isConfigured()) {
+            return SendResult.fail("企微凭据未配置完整（app.wecom.corp-id/session-secret/app-secret），"
+                    + "请按 README M1 配置 application-wecom.yml 并 enabled=true");
+        }
+        return weComApiClient.sendTextMessage(message.contactExternalId(), message.content());
+    }
+
+    /** GET URL 验证：验签并解密 echostr，返回明文（失败抛异常由 Controller 转 4xx/5xx） */
+    public String verifyUrl(String msgSignature, String timestamp, String nonce, String echoStr) {
+        WXBizMsgCrypt crypt = requireCrypt();
+        return crypt.verifyUrl(msgSignature, timestamp, nonce, echoStr);
     }
 
     /**
-     * 企微会话存档/客户消息回调入口（占位，M1 由 Web Controller 暴露）。
-     * 真实实现要点：
-     * <pre>
-     * 1. 验签：校验 msg_signature / timestamp / nonce（使用 callback-token）；
-     * 2. 解密：对 echostr 或消息体使用 callback-aes-key AES-CBC 解密；
-     * 3. 同步返回 ack 字符串（成功必须尽快响应，企微要求 5 秒内）；
-     * 4. 解密后的 XML 中提取 FromUserName(=external_userid)、MsgId、Content 等，
-     *    以 MsgId 幂等去重后 publish 到 MessageBus，由编排器异步处理；
-     * 5. 会话存档（会话内容存档-secret + RSA 私钥解密 media_data）请另设定时拉取任务。
-     * </pre>
+     * 回调 POST 处理：验签 → 解密 → 解析外部消息 → 幂等去重 → 异步投 MessageBus。
+     * 必须快速返回 "success"（企微要求 5 秒内 ack）。
      *
-     * @return 5 秒内必须返回的 ack（真实接入时返回 "success"）
+     * @param encryptMsg 请求体 {@code <Encrypt>} 节点内容（密文）
      */
-    public String receiveCallback(Map<String, String> params, String rawBody) {
-        // TODO(M1): 验签 + 解密 + 投递 MessageBus
-        log.warn("[WeComChannel] 收到企微回调（占位，未真正处理）: params={}", params);
+    public String receiveCallback(String msgSignature, String timestamp, String nonce, String encryptMsg) {
+        WXBizMsgCrypt crypt = requireCrypt();
+        // 验签失败直接抛异常（Controller 转 401），验签通过则解密
+        String xml = crypt.decryptMsg(msgSignature, timestamp, nonce, encryptMsg);
+        Optional<Message> message = WeComCallbackXml.parseInbound(xml);
+        if (message.isEmpty()) {
+            log.debug("[WeComChannel] 回调消息无需处理（事件/非文本/缺字段），ack 返回 success");
+            return "success";
+        }
+        Message msg = message.get();
+        dispatchAsync(msg);
         return "success";
     }
 
-    /** 返回当前配置是否已填写真实企微凭据（供启动时校验） */
+    /** 异步投递：以 msgId 幂等去重后 publish MessageBus */
+    private void dispatchAsync(Message msg) {
+        try {
+            wecomCallbackExecutor.execute(() -> {
+                try {
+                    if (messageLogRepository.existsByMsgId(msg.getMsgId())) {
+                        log.info("[WeComChannel] 回调消息已处理过，跳过 msgId={}", msg.getMsgId());
+                        return;
+                    }
+                    messageBus.publish(msg);
+                } catch (Exception e) {
+                    log.error("[WeComChannel] 异步投递 MessageBus 失败 msgId={} err={}",
+                            msg.getMsgId(), e.getMessage(), e);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            // 队列满不阻塞 ack；丢消息由会话存档定时拉取兜底补齐
+            log.error("[WeComChannel] 回调任务队列已满，msgId={} 本次丢弃，将由会话存档拉取兜底",
+                    msg.getMsgId());
+        }
+    }
+
+    /** 返回当前配置是否已填写真实企微凭据（供启动/管理端校验与优雅降级） */
     public Map<String, Boolean> configStatus() {
         AppProperties.Wecom w = appProperties.getWecom();
         Map<String, Boolean> status = new HashMap<>();
-        status.put("corpId", !isBlank(w.getCorpId()) && !"YOUR_CORP_ID".equals(w.getCorpId()));
-        status.put("sessionSecret", !isBlank(w.getSessionSecret()) && !"YOUR_SESSION_ARCHIVE_SECRET".equals(w.getSessionSecret()));
-        status.put("callbackToken", !isBlank(w.getCallbackToken()) && !"YOUR_CALLBACK_TOKEN".equals(w.getCallbackToken()));
-        status.put("callbackAesKey", !isBlank(w.getCallbackAesKey()) && !"YOUR_CALLBACK_AES_KEY".equals(w.getCallbackAesKey()));
-        status.put("sessionArchivePrivateKey", !isBlank(w.getSessionArchivePrivateKey()) && !"YOUR_PRIVATE_KEY_PEM".equals(w.getSessionArchivePrivateKey()));
+        status.put("enabled", w.isEnabled());
+        status.put("corpId", real(w.getCorpId()));
+        status.put("sessionSecret", real(w.getSessionSecret()));
+        status.put("callbackToken", real(w.getCallbackToken()));
+        status.put("callbackAesKey", real(w.getCallbackAesKey()));
+        status.put("sessionArchivePrivateKey", real(w.getSessionArchivePrivateKey()));
+        status.put("agentId", real(w.getAgentId()));
+        status.put("appSecret", real(w.getAppSecret()));
+        status.put("archivePullEnabled", w.isArchivePullEnabled());
         return status;
     }
 
-    private boolean isBlank(String s) {
-        return s == null || s.isBlank();
+    /** 供管理端展示当前企业成员/外部前缀等方向识别配置 */
+    public List<String> externalPrefixes() {
+        return appProperties.getWecom().getExternalIdPrefixes();
+    }
+
+    private WXBizMsgCrypt requireCrypt() {
+        if (wxCrypt == null) {
+            throw new IllegalStateException("回调加解密未初始化：请配置 app.wecom.callback-token / "
+                    + "callback-aes-key / corp-id（真实值）后重启");
+        }
+        return wxCrypt;
+    }
+
+    private boolean real(String s) {
+        return s != null && !s.isBlank() && !s.startsWith("YOUR_");
     }
 }

@@ -1,3 +1,14 @@
+---
+AIGC:
+    Label: "1"
+    ContentProducer: 001191440300708461136T1XGW3
+    ProduceID: 0cb96a239235a576bd3237f47934315e_e01fa281a81e11f18ba4525400f8a581
+    ReservedCode1: j0NhcP8vMlqwJ0bOVxPSNRvb6Ke3WdXZiL6fgWk2sNNkfAj9kvV6JOHyWu61tsaCoLLV8LnnV5GNwptCeJR2tibcZdGhMBTiqyGOliRTVEzKEDVX1AE7AYqFTB/FyYAO2KQ45ByWQgPefrVByeF/0zZ+YPo2E/2lNyBl6ktCyleXtFYcDhbFFY/lFN4=
+    ContentPropagator: 001191440300708461136T1XGW3
+    PropagateID: 0cb96a239235a576bd3237f47934315e_e01fa281a81e11f18ba4525400f8a581
+    ReservedCode2: j0NhcP8vMlqwJ0bOVxPSNRvb6Ke3WdXZiL6fgWk2sNNkfAj9kvV6JOHyWu61tsaCoLLV8LnnV5GNwptCeJR2tibcZdGhMBTiqyGOliRTVEzKEDVX1AE7AYqFTB/FyYAO2KQ45ByWQgPefrVByeF/0zZ+YPo2E/2lNyBl6ktCyleXtFYcDhbFFY/lFN4=
+---
+
 # 企业微信销售 Agent（WeChat Sales Agent）
 
 基于**企业微信官方会话存档方案**的单体 Spring Boot 项目骨架与设计文档。
@@ -100,42 +111,57 @@ mysql -uroot -p wechat_sales < src/main/resources/schema.sql
 mvn spring-boot:run -Dspring-boot.run.profiles=mysql
 ```
 
-## M1：接入真实企微的步骤清单
+## M1：真实企业微信接入
 
-> 真实接入**必须**使用企业微信官方"会话内容存档"API（受监管接口，需企业认证并配置存档私钥/公钥）。
-> 本项目已预留 `WeComChannel` / `WeComApiClient` 占位与全部配置项注释；接入点搜索 `TODO` 定位。
+> 状态：**核心代码已完成并通过本地单元测试**（`mvn test` 全绿，仅自造样例验证加解密算法，**尚未与真实企微账号联调**）。
+> 剩余工作为「老板提供真实企业物料 → 填 `application-wecom.yml` → 真实联调」，见下文清单。
 
-1. **企业侧准备**
-   - 企业微信管理后台开通「会话内容存档」并购买对应席位；拿到 `corpId`。
-   - 生成并配置会话存档专用 **公钥/私钥对**（私钥保存在本服务，公钥上传企微后台）。
-   - 后台配置回调 URL（消息/会话回调）与 Token/EncodingAESKey。
-   - 为应用分配 `secret`（会话存档 secret / 通讯录 secret）与可调用 API 的 IP 白名单。
+### 1. 本阶段已完成（代码实现）
 
-2. **配置项填写**（`application-mysql.yml` / `application-prod.yml`，字段注释见 `WeComApiClient`）
-   - `wecom.corp-id` / `wecom.secret` / `wecom.callback.token` / `wecom.callback.aes-key`
-   - `wecom.archive.private-key`（会话存档私钥路径） / `wecom.archive.sdk-proxy`（如使用官方 SDK 代理）
+| 模块 | 实现 | 位置 |
+|---|---|---|
+| 官方 API 客户端 | access_token 获取与过期前 5 分钟自动续期缓存；`getchatdata` 增量拉取（seq、limit=1000、next_seq）；`message/send` 应用消息发送（返回真实 msgid，错误码 60011/45009/48002 等降级说明） | `channel/WeComApiClient.java` |
+| 会话存档解密 | RSA(PKCS1/PKCS8 PEM 自动识别) 私钥解 `encrypt_random_key` → AES-256-CBC(PKCS7, IV=key 前 16 字节) 解密 `encrypt_chat_msg` | `crypto/ArchiveDecryptor.java`、`crypto/AesCbc.java` |
+| seq 游标持久化 | `archive_seq` 单行表（`seq_cursor` 列），拉取后按回包最大 `next_seq` 更新 | `domain/ArchiveSeqState.java` + `schema.sql` |
+| 存档消息映射 | 明文 JSON → 领域 `Message`：文本类可定位外部客户（单聊/群聊方向启发式）才投递，员工外发/非文本跳过 | `channel/ArchiveMessageMapper.java` |
+| 定时增量拉取 | `@Scheduled`（默认 10s 首拉后每 60s），`app.wecom.enabled=true` 才注册，无凭据自动跳过不刷屏 | `channel/WeComArchivePuller.java` |
+| 回调加解密 | 语义对齐官方 `WXBizMsgCrypt`：SHA1 验签、EncodingAESKey(43)→32 字节 key、AES-256-CBC(PKCS7)、原文=随机16B+网络序 len+msg+receiveId | `crypto/WXBizMsgCrypt.java` |
+| 回调 Controller | `GET /wecom/callback` URL 验证回显；`POST /wecom/callback` 验签失败 401、成功立即 ack `success`、异步投 MessageBus（msgId 幂等） | `web/WeComCallbackController.java`、`channel/WeComChannel.java`、`channel/WeComCallbackXml.java` |
+| 配置接线 | `AppProperties.Wecom` 扩展 + `application-wecom.yml`（默认不激活 profile）；`application-demo.yml` M0 mock 链路不受影响 | `config/AppProperties.java`、`application-wecom.yml` |
+| 单元测试 | 加解密往返/验签/篡改防护/密钥格式/RSA 全链路/存档映射方向/XML 解析 + M0/M1 核心逻辑，共 40 例全绿（18 例加解密与通道 + 22 例状态机/策略/报价/上下文/REST） | `src/test/java/...` |
 
-3. **通道切换**
-   - `app.channel.active: wecom`（M0 为 `mock`）；`wecom.agent` 设置对外发送所用应用 agentId。
+本地验证范围：仅用**自造样例**做算法往返与方向判断验证；不构成「已与真实企微联调」声明。
 
-4. **实现消息拉取与解密**（`WeComChannel` / 新增 `ArchivePuller` 定时任务）
-   - 用会话存档 secret 换取 access_token；分页拉取 `getchatdata` 增量消息（`seq` 游标持久化）。
-   - 用官方 SDK（`WeWorkFinanceSdk`，Java 通过 JNI/SDK 代理调用）或自研解密（AES-256-GCM，需 RSA 私钥解出会话密钥）还原明文消息。
-   - 消息结构映射到 `Message`（msgId / externalUserId / content / msgType），推入 `MessageBus`（幂等见下）。
+### 2. 剩余真实接入步骤（需老板在企微管理后台准备物料）
 
-5. **回调接入（5 秒 ack + 异步处理）**
-   - 新增回调 `@RestController`（`/wecom/callback`），校验签名与解密，业务上**立即返回**并异步投递到 `MessageBus`。
-   - **禁止在回调线程内做长耗时**（解密/LLM/DB 写）：本项目编排器挂在消息总线监听，天然解耦。
-   - `msgId` 幂等去重：`message_log.msg_id` 唯一索引 + 编排器先 `existsByMsgId` 再落库，重复回调不重复建草稿/不重复发送。
+| 物料 | 说明 | 配置项 |
+|---|---|---|
+| corpId | 「我的企业 → 企业信息」 | `app.wecom.corp-id` |
+| 会话存档 secret | 「安全与管理 → 管理工具 → 会话内容存档」开通并获取；需配可信 IP | `app.wecom.session-secret` |
+| 会话存档 RSA 私钥 | 后台生成公钥上传企微，私钥下载保存（PKCS1 PEM） | `app.wecom.session-archive-private-key`（建议环境变量注入） |
+| 回调 Token / EncodingAESKey | 自建应用「接收消息服务器配置」，配公网 URL `https://你的域名/wecom/callback` | `app.wecom.callback-token` / `callback-aes-key` |
+| agentId / app-secret | 自建应用（需「客户联系」权限与员工发送客户消息授权） | `app.wecom.agent-id` / `app-secret` |
+| 可信 IP | 服务器出口 IP 加入企微「企业可信 IP」 | — |
 
-6. **外发能力**
-   - `OutboundSender` 保持"读待发送表 + 找 active 通道发送"逻辑不变，仅替换 `WeComApiClient.sendTextMessage()` 实现（调用企微「客户联系-发送应用消息」API 或服务号消息）。
-   - 企业微信外部联系人主动消息有 48 小时窗口等限制，需在策略层约束（TODO 注释已标）。
+### 3. 启动真实模式
 
-7. **生产化开关**
-   - 频率限制：`MessageBus` 通道侧对客户做令牌桶限频（TODO：`RateLimiter` 接入）。
-   - 审批模式：生产建议保持 `MANUAL`；测试可 `app.approval-mode: AUTO`。
-   - 切换 LLM：实现 `LLMClient` 接入内部大模型服务（如混元/DeepSeek 等），替换 `MockLLMClient` Bean 即可，编排器不改。
+```bash
+# 1) 复制/编辑 src/main/resources/application-wecom.yml 填入真实物料（或环境变量注入）
+# 2) 先按 schema.sql 在 MySQL 建表（新增 archive_seq 表）
+# 3) 以 wecom + mysql profile 启动
+mvn spring-boot:run -Dspring-boot.run.profiles=mysql,wecom
+```
+
+- `app.wecom.enabled: true` 后，WeComChannel / 回调 Controller / 存档定时拉取才注册；未填真实凭据时启动不报错，回调返回失败提示、拉取自动跳过。
+- `app.channel.active: wecom` 后外发走 `message/send`（`external-to-userid` 映射解析 touser；映射缺失按原 external_userid 直发并 WARN）。
+- 保持 `app.approval-mode: MANUAL`：真实发送前由销售人工审批把关。
+
+### 4. 真实联调注意事项
+
+- 外发合规：企业微信对主动外发客户消息有窗口/通道限制（如 48 小时会话窗口、需客户联系权限），联调前确认后台授权，避免 60011/48002。
+- 频率限制（令牌桶）仍是 TODO 接入点（`DESIGN.md §7.4`），未上线生产前建议人工审批兜底。
+- 语音/图片等非文本消息 M1 仅落日志跳过，转文本需另接语音识别/图片理解（TODO）。
+- 私钥/secret 严禁入库入 git，生产走 KMS/环境变量。
 
 ## 对接自有业务系统（SPI 设计）
 
@@ -167,8 +193,8 @@ wechat-sales-agent/
     │   ├── strategy/ReplyStrategy... / StrategyService.java, LLMClient.java,
     │   │             MockLLMClient.java, ComplianceFilter.java,
     │   │             DraftApprovalService.java, SalesAgentOrchestrator.java
-    │   ├── action/QuoteService.java, MockQuoteService.java, QuoteResult.java,
-    │   │          QuoteRequest.java, ActionLogger.java
+    │   ├── action/QuoteService.java, MockQuoteService.java, HttpQuoteService.java,
+    │   │          QuoteResult.java, QuoteRequest.java, ActionLogger.java
     │   ├── domain/  (实体 + 枚举 + Repository)
     │   ├── rest/AdminController.java, ApiResponse.java
     │   └── exception/
@@ -186,3 +212,4 @@ wechat-sales-agent/
 
 ## 定制或商务联系 
 QQ：467643531
+*（内容由AI生成，仅供参考）*

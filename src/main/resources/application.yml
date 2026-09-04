@@ -43,6 +43,14 @@ app:
       - 百分百
       - 竞品XX
       - 免费送
+  quote:
+    http:
+      # true=对接真实报价系统（注册 HttpQuoteService，MockQuoteService 停用）；默认 false 保持 Mock 演示
+      enabled: false
+      # 内部报价系统根地址，例如 http://quote.internal.example.com
+      base-url: ""
+      # 调用报价系统鉴权 Key（建议环境变量注入），适配器以 X-API-Key 头发送
+      api-key: ""
   wecom:
     # ===== 真实企微接入配置（占位，勿在 M0 使用）=====
     # corpId / 会话存档 secret / 回调 Token / 回调 EncodingAESKey / 会话存档私钥

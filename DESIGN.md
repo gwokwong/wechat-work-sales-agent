@@ -1,3 +1,14 @@
+---
+AIGC:
+    Label: "1"
+    ContentProducer: 001191440300708461136T1XGW3
+    ProduceID: 0cb96a239235a576bd3237f47934315e_e11d1345a81e11f18ba4525400f8a581
+    ReservedCode1: pW2i1VIxCuqlNT+5oFkh9WXsLvzOyspEr0M+bFWt/nt/kJQZUw6PKUARFt/0Vg9rMOeatCnHpBg8gnLgxM/5EIj2DGdf9iB0xPW1IgpDXT1dQ9JCBqfjmMq0Gh+sw50XXvOATZlv5OaxCyU1Rq54nNVlTPYB5rp7eXSDYqbIMhYjEYm5DVsu5jOuiU4=
+    ContentPropagator: 001191440300708461136T1XGW3
+    PropagateID: 0cb96a239235a576bd3237f47934315e_e11d1345a81e11f18ba4525400f8a581
+    ReservedCode2: pW2i1VIxCuqlNT+5oFkh9WXsLvzOyspEr0M+bFWt/nt/kJQZUw6PKUARFt/0Vg9rMOeatCnHpBg8gnLgxM/5EIj2DGdf9iB0xPW1IgpDXT1dQ9JCBqfjmMq0Gh+sw50XXvOATZlv5OaxCyU1Rq54nNVlTPYB5rp7eXSDYqbIMhYjEYm5DVsu5jOuiU4=
+---
+
 # DESIGN — 企业微信销售 Agent 设计文档
 
 > 版本：v0.1（M0 骨架演示版）　状态：设计定稿 + 骨架实现可运行
@@ -198,21 +209,37 @@ AUTO 模式（app.approval-mode=AUTO，仅测试）→ 自动 approve + 发送
 
 ## 7. 企微接入要点（M1）
 
-### 7.1 会话存档消息获取与解密
+> 本阶段状态：接入层代码已完成并通过本地单测（自造样例验证），尚未与真实企微账号联调。
 
-- 官方"会话内容存档"接口路径（`WeComApiClient` 占位注释已列）：`getaccess_token` → `getchatdata`（seq 增量拉取，保存游标）→ SDK 解密。
-- 解密链路：企微用 RSA 公钥加密"会话密钥"→ 本服务用私钥解出 `AES key` → 用 AES-256-GCM 解密消息密文。生产实现建议使用官方 `WeWorkFinanceSdk`（C++ SDK 经 proxy/JNI），避免自行实现加解密踩坑。
-- **占位实现要点**：`WeComApiClient` 已含 TODO：accessToken 缓存与自动续期、seq 游标持久化、SDK 解密调用、明文映射 `Message`。
+### 7.1 会话存档消息获取与解密（已实现）
 
-### 7.2 msgId 幂等去重
+- 官方接口：`gettoken`（会话存档 secret）→ `getchatdata`（seq 增量拉取，limit≤1000，回包 `next_seq` 为下次起点）。
+- 解密链路（与官方语义核对一致，见 `crypto/` 实现）：
+  `encrypt_random_key`（Base64）→ RSA 私钥（PKCS#1 v1.5，2048bit）解密 → 32 字节 `randomKey`
+  → 以 randomKey 为密钥、前 16 字节为 IV 对 `encrypt_chat_msg` 做 **AES-256-CBC + PKCS7** 解密 → 消息明文 JSON。
+  （M0 文档此处曾误记为 AES-256-GCM，M1 编码前已联网核对官方文档更正为 CBC/PKCS7。）
+- seq 游标持久化：`archive_seq` 表（单行 id=1，`seq_cursor` 列避免 MySQL 保留字），拉取成功后再推进。
+- 明文映射：`ArchiveMessageMapper` 仅将「文本类且可定位外部客户」映射为 IN `Message`；员工外发、
+  群聊内部成员发言（缺群成员→客户映射）、语音/图片等跳过并留 TODO。
+- 实现类：`crypto/ArchiveDecryptor.java`、`crypto/AesCbc.java`、`channel/WeComApiClient.java`、
+  `channel/WeComArchivePuller.java`、`channel/ArchiveMessageMapper.java`、`domain/ArchiveSeqState.java`。
+
+### 7.2 msgId 幂等去重（已实现）
 
 - `message_log.msg_id` 唯一索引（DB 层） + `existsByMsgId` 前置判断（应用层双保险）。
-- 幂等范围覆盖：同一 msgId 重复回调/重复拉取不会重复建档、重复生成草稿、重复发送。
+- 幂等覆盖范围：同一 msgId 重复回调/重复拉取不会重复建档、重复生成草稿、重复发送。
+- 存档拉取侧（`WeComArchivePuller`）在 publish 前同样做 `existsByMsgId` 去重；回调侧（`WeComChannel`）
+  异步任务内先幂等判断再投总线。
 
-### 7.3 回调 5 秒 ack + 异步处理
+### 7.3 回调 5 秒 ack + 异步处理（已实现）
 
-- 回调控制器只做：验签解密 → `MessageBus.dispatch`（同步极快）→ **立即返回**。
-- 所有重活（分类/LLM/写库/审批）由 `MessageListener`（编排器）在调度线程池异步执行——对应企微"回调须 5 秒内响应 ack"的要求（实现上也可对企微回调 URL 返回 200 空串，后续用轮询兜底消息完整）。
+- `WeComCallbackController`：GET URL 验证（echostr 解密回显）；POST 验签解密后**立即返回** `success`；
+  验签失败返回 401。
+- 消息处理由 `wecomCallbackExecutor`（2-8 线程 + 2000 队列）异步执行：幂等判断 → `MessageBus.publish`；
+  任务被拒绝不阻塞 ack（丢消息由会话存档拉取兜底补齐）。
+- 加解密语义（`crypto/WXBizMsgCrypt.java`）：EncodingAESKey 43 位 + "=" Base64 → 32 字节 key；
+  AES-256-CBC（IV=key 前 16 字节，PKCS7）；原文 = 随机16字节 + 4 字节网络序 msgLen + msg + receiveId(corpId)；
+  签名 = SHA1(字典序拼接 token/timestamp/nonce/encrypt) 小写 hex。
 - 注意回调重试导致的重复投递由 7.2 幂等收敛。
 
 ### 7.4 频率限制（TODO 接入点）
@@ -222,8 +249,9 @@ AUTO 模式（app.approval-mode=AUTO，仅测试）→ 自动 approve + 发送
 
 ### 7.5 安全红线（真实企微）
 
-- 私钥/secret 走环境变量或 KMS，绝不入库入 git（配置注释已提醒）。
-- 外发消息必须满足企微外部联系人消息规则（48 小时主动消息窗口、服务号/客户联系不同消息通道），占位注释给 TODO。
+- 私钥/secret 走环境变量或 KMS，绝不入库入 git（`application-wecom.yml` 已注释提醒）。
+- 外发消息必须满足企微外部联系人消息规则（48 小时主动消息窗口、客户联系/应用消息通道差异），
+  `WeComApiClient` 对 60011 无权限 / 45009 频率限制 / 48002 api 不可用做日志与降级说明。
 
 ---
 
@@ -253,6 +281,7 @@ public interface QuoteService {
 | 配置 | 默认（demo）| 说明 |
 |---|---|---|
 | `app.channel.active` | `mock` | `mock`/`wecom`；决定 OutboundSender 外发通道 |
+| `app.wecom.enabled` | `false` | `true` 才注册 WeComChannel/回调 Controller/存档拉取；真实接入用 `application-wecom.yml` profile（`mysql,wecom`） |
 | `app.approval-mode` | `MANUAL` | `MANUAL` 人工审批 / `AUTO` 自动发送（测试）|
 | `app.llm.mock` | `true` | 是否启用 MockLLM（true 时无需真实模型）|
 | `app.mock.inject-enabled` | `true` | MockChannel 定时注入开关 |
@@ -265,14 +294,21 @@ public interface QuoteService {
 
 ## 10. 可观测性与扩展 TODO（M1+）
 
-- [ ] 企微会话存档 SDK/解密真实实现与单测夹具
-- [ ] 回调控制器 + 验签 + 5s ack + 消息推送重试
+- [x] 企微会话存档解密实现与本地单测夹具（ArchiveDecryptor + AesCbc，RSA+AES 全链路）
+- [x] 回调控制器 + 验签 + 5s ack + 异步消息推送（WeComCallbackController + WeComChannel）
+- [x] getchatdata 增量拉取 + seq 游标持久化 + 定时任务（WeComArchivePuller + archive_seq）
+- [ ] 真实企微物料联调（等老板提供 corpId/secret/私钥/agentId 等，见 README M1 清单）
 - [ ] 通道级/客户级频率限制（令牌桶）
+- [ ] 语音转文本 / 图片 OCR 后转文本处理
+- [ ] 群聊「群成员 → 外部客户」完整映射
 - [ ] 真实 LLMClient 实现（系统提示词约束：只润色不新承诺）
 - [ ] ComplianceFilter 规则外置（词库/正则配置化）
-- [ ] 业务系统报价/CRM SPI 真实实现与重试/幂等
+- [x] M0/M1 核心逻辑单元测试补强（stage/strategy/action/context/rest/web，JUnit5+Mockito，22 例新增）
+- [x] 真实报价 HTTP 适配器（HttpQuoteService，条件装配 + bizRefNo 回填 + FAILED 兜底，MockRestServiceServer 单测）
+- [ ] 业务系统报价/CRM SPI 重试/幂等增强（幂等键/失败重投/回调轮询确认）
 - [ ] 消息分片/长文本、图片/文件消息处理
 
 
 ## 定制或商务联系
 QQ：467643531
+*（内容由AI生成，仅供参考）*

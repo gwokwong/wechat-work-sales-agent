@@ -132,3 +132,14 @@ CREATE TABLE action_log (
     KEY idx_action_contact (contact_id),
     KEY idx_action_type (action_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='动作日志';
+
+-- 会话存档拉取游标（seq）：M1 真实企微接入，单行记录（id=1），
+-- 由 WeComArchivePuller 每次 getchatdata 拉取后用回包最大 next_seq 更新。
+-- 与 archive_seq 实体 ArchiveSeqState 对齐（列名 seq_cursor 避免 MySQL 保留字）。
+DROP TABLE IF EXISTS archive_seq;
+CREATE TABLE archive_seq (
+    id         BIGINT       NOT NULL COMMENT '固定主键（单企业单实例=1）',
+    seq_cursor BIGINT       NOT NULL DEFAULT 0 COMMENT '下一次拉取起点（企微回包最大 next_seq）',
+    updated_at DATETIME     DEFAULT NULL COMMENT '更新时间',
+    PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='会话存档拉取游标';
