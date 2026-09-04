@@ -1,0 +1,33 @@
+# ============================================================
+# demo 演示环境：H2 内存库 + MockChannel + MockLLM + 人工审批
+# 通过 mvn spring-boot:run 即可启动（默认 profile=demo）
+# ============================================================
+spring:
+  datasource:
+    url: jdbc:h2:mem:wechat_sales;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      # demo 环境由 JPA 自动建表（create-drop），不使用 schema.sql（schema.sql 是 MySQL 方言）
+      ddl-auto: create-drop
+    show-sql: false
+    defer-datasource-initialization: false
+  sql:
+    init:
+      mode: never
+  task:
+    scheduling:
+      pool:
+        size: 4
+
+logging:
+  level:
+    com.example.wechatsales: INFO
+    org.hibernate.SQL: WARN

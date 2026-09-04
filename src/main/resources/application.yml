@@ -1,0 +1,57 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: wechat-sales-agent
+  profiles:
+    # 默认启用 demo 演示环境（H2 + MockChannel + MockLLM + 人工审批）。
+    # 接入真实环境请使用 -Dspring-boot.run.profiles=mysql 并修改 application-mysql.yml。
+    default: demo
+  jpa:
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: Asia/Shanghai
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+
+app:
+  # 人工闸门：MANUAL=每条约话术必须人工确认后才发送；AUTO=审批通过策略后自动发送（演示不建议）
+  approval-mode: MANUAL
+  channel:
+    # 可选值：mock（默认） / wecom（真实企微，未接入时会抛明确错误）
+    active: mock
+  mock:
+    # 是否启动 Mock 演示自动流水线（每分钟注入一条模拟客户消息）
+    enabled: true
+    # 注入间隔（毫秒），按“每分钟一条”的规格默认 60000
+    interval-ms: 60000
+    first-delay-ms: 15000
+    customer-a-id: wxid_demo_001
+    customer-b-id: wxid_demo_002
+  compliance:
+    # 敏感词/不合规词，命中即阻断自动发送
+    sensitive-words:
+      - 保证
+      - 承诺100%
+      - 返现
+      - 私下转账
+      - 绝对
+      - 百分百
+      - 竞品XX
+      - 免费送
+  wecom:
+    # ===== 真实企微接入配置（占位，勿在 M0 使用）=====
+    # corpId / 会话存档 secret / 回调 Token / 回调 EncodingAESKey / 会话存档私钥
+    corp-id: YOUR_CORP_ID
+    session-secret: YOUR_SESSION_ARCHIVE_SECRET
+    callback-token: YOUR_CALLBACK_TOKEN
+    callback-aes-key: YOUR_CALLBACK_AES_KEY
+    # RSA 私钥（会话存档数据解密用），建议从环境变量注入而不是写死在配置里
+    session-archive-private-key: YOUR_PRIVATE_KEY_PEM
+    # 应用 AgentId（发送客户消息需要“客户联系”secret + 员工可发送客户消息的授权）
+    agent-id: 1000002
+    app-secret: YOUR_APP_SECRET

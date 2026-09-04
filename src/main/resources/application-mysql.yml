@@ -1,0 +1,30 @@
+# ============================================================
+# 真实/联调环境：MySQL（需先执行 schema.sql 建表）
+# 启动方式：
+#   mvn spring-boot:run -Dspring-boot.run.profiles=mysql
+# 或打包后：
+#   java -jar target/wechat-sales-agent-0.1.0-SNAPSHOT.jar --spring.profiles.active=mysql
+# ============================================================
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/wechat_sales?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      # MySQL 环境使用 schema.sql 管理表结构，Hibernate 不做 DDL
+      ddl-auto: none
+    defer-datasource-initialization: true
+    show-sql: false
+  sql:
+    init:
+      # 执行 classpath:schema.sql（建表）+ classpath:data.sql（预置策略配置）
+      mode: always
+      encoding: UTF-8
+
+app:
+  channel:
+    active: mock
+  mock:
+    enabled: true
