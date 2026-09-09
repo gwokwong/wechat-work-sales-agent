@@ -3,6 +3,7 @@ package com.example.wechatsales.strategy;
 import com.example.wechatsales.context.ContactContext;
 import com.example.wechatsales.domain.SalesStage;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -13,9 +14,13 @@ import java.util.Locale;
  * 保证演示链路无外部依赖即可跑通（话术质量、策略覆盖等指标会在接入真实 LLM 后提升）。
  *
  * <p>个性化规则：结合客户最近一条消息，追加一句回应或问询，模拟 LLM 的上下文感知。</p>
+ *
+ * <p>装配：app.llm.mock=true（默认）时注册；置 false 后由 {@link HttpLLMClient} 接管，
+ * 二者由条件互斥，避免同一 LLMClient 接口出现多 bean 歧义。</p>
  */
 @Slf4j
 @Service
+@ConditionalOnProperty(prefix = "app.llm", name = "mock", havingValue = "true", matchIfMissing = true)
 public class MockLLMClient implements LLMClient {
 
     @Override

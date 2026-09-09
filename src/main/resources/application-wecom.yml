@@ -50,6 +50,18 @@ app:
     # 会话存档数据解密私钥（PKCS1 或 PKCS8 PEM 文本，换行用 \n 或环境变量注入）
     session-archive-private-key: ${WECOM_PRIVATE_KEY_PEM:YOUR_PRIVATE_KEY_PEM}
 
+    # ---- 外发频率限制（客户级令牌桶，DESIGN.md §7.4）----
+    # 生产建议开启，防止对同一客户短时间营销轰炸（默认关闭，不影响 M0 演示）
+    rate-limit-enabled: false
+    # 桶容量：单客户可立即连续发送的条数
+    rate-limit-capacity: 5
+    # 令牌补充速率（条/秒）：0.05 ≈ 每 20 秒补 1 个令牌
+    rate-limit-per-second: 0.05
+
+    # ---- 外发长文本分片（DESIGN.md §10）----
+    # 单条外发最大字符数：超长文本按段落/换行边界拆分为多条顺序发送（企微文本消息建议上限 2048）
+    max-outbound-length: 2048
+
     # ---- 会话存档定时拉取 ----
     # 默认 true（本 profile 下自动增量拉取）；无凭据时自动跳过
     archive-pull-enabled: true

@@ -82,7 +82,7 @@ class AdminControllerTest {
         contact.setName("王总");
         when(contactRepository.findAll()).thenReturn(List.of(contact));
         ApiResponse<List<Contact>> customers = controller.customers();
-        assertEquals(0, customers.code());
+        assertEquals(200, customers.code());
         assertEquals(1, customers.data().size());
 
         // 发送失败 → 500 + 错误说明；随后重试成功 → 200 + messageId
@@ -94,7 +94,7 @@ class AdminControllerTest {
         assertTrue(failed.message().contains("mock 通道未配置"));
 
         ApiResponse<SendResult> ok = controller.manualSend(1L, new AdminController.SendRequest("你好"));
-        assertEquals(0, ok.code());
+        assertEquals(200, ok.code());
         assertTrue(ok.data().success());
         assertEquals("mock-msg-9", ok.data().messageId());
     }

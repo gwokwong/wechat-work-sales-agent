@@ -24,6 +24,7 @@ public class AppProperties {
     private Compliance compliance = new Compliance();
     private Wecom wecom = new Wecom();
     private Quote quote = new Quote();
+    private Llm llm = new Llm();
 
     /** 真实报价系统 HTTP 适配配置（app.quote.http.*） */
     @Data
@@ -77,6 +78,27 @@ public class AppProperties {
         ));
         /** 单条话术最大长度 */
         private int maxContentLength = 2000;
+        /** 正则表达式列表，命中即阻断（如银行卡/身份证号等号码外泄） */
+        private List<String> blockedPatterns = new ArrayList<>();
+        /** 与 blockedPatterns 一一对应的规则名（英文逗号分隔）；为空时阻断原因直接用正则原文 */
+        private String patternRuleNames = "";
+    }
+
+    /** LLM 话术生成配置（app.llm.*）：mock=true 走 MockLLMClient（演示默认）；false 走 OpenAI 兼容 HTTP 客户端 */
+    @Data
+    public static class Llm {
+        /** true=MockLLMClient（规则个性化演示，不依赖外部模型）；false=HttpLLMClient（OpenAI 兼容 chat/completions） */
+        private boolean mock = true;
+        /** OpenAI 兼容根地址，如 https://api.deepseek.com/v1（自动拼接 /chat/completions） */
+        private String baseUrl = "";
+        /** API Key（建议环境变量注入，如 ${DEEPSEEK_API_KEY:}），请求以 Bearer 头发送 */
+        private String apiKey = "";
+        /** 模型名，如 deepseek-chat */
+        private String model = "";
+        /** 采样温度（0~1，越高越发散） */
+        private double temperature = 0.7;
+        /** HTTP 连接/读取超时（秒），预留字段；当前随 Spring Boot RestClient 默认配置生效 */
+        private int timeoutSeconds = 30;
     }
 
     /** 真实企微接入配置（M1 阶段使用，占位） */
@@ -84,6 +106,18 @@ public class AppProperties {
     public static class Wecom {
         /** 总开关：false 时 WeComChannel / 回调 Controller / 存档拉取均不启用（启动不报错） */
         private boolean enabled = false;
+
+        // ---- 外发频率限制（客户级令牌桶，DESIGN.md §7.4；默认关闭，不影响 M0 演示）----
+        /** 是否启用客户级发送频率限制 */
+        private boolean rateLimitEnabled = false;
+        /** 令牌桶容量：单客户可立即连续发送的条数 */
+        private int rateLimitCapacity = 5;
+        /** 令牌补充速率：每秒补充条数（默认 0.05 ≈ 每 20 秒补 1 个令牌） */
+        private double rateLimitPerSecond = 0.05;
+
+        // ---- 外发长文本分片（DESIGN.md §10 消息分片/长文本处理）----
+        /** 单条外发最大字符数：超过则按段落/换行边界拆分为多条顺序发送（企微文本消息建议上限 2048） */
+        private int maxOutboundLength = 2048;
 
         private String corpId = "";
         private String sessionSecret = "";

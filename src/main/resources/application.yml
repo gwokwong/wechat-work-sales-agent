@@ -43,6 +43,13 @@ app:
       - 百分百
       - 竞品XX
       - 免费送
+    # 正则规则（可外置扩展）：命中即阻断，用于拦截银行卡/身份证号等号码类内容
+    # 说明：演示默认给出 1 条不误伤演示话术的号码正则；生产可按需增删（如手机号 \b1[3-9]\d{9}\b）
+    blocked-patterns:
+      - \b\d{15,18}\b
+    # 与 blocked-patterns 一一对应的规则名（英文逗号分隔，个数不足时自动回退正则原文）
+    # 示例：blocked-patterns 配 2 条时写：银行卡身份证号码,手机号码
+    pattern-rule-names: 银行卡/身份证号码
   quote:
     http:
       # true=对接真实报价系统（注册 HttpQuoteService，MockQuoteService 停用）；默认 false 保持 Mock 演示
@@ -51,6 +58,20 @@ app:
       base-url: ""
       # 调用报价系统鉴权 Key（建议环境变量注入），适配器以 X-API-Key 头发送
       api-key: ""
+  llm:
+    # 话术生成模型开关：true=MockLLMClient（规则个性化演示，默认，无需外部依赖）；
+    # 联调真实模型时置 false 并填写下方 base-url / api-key / model（建议通过环境变量注入）
+    mock: true
+    # OpenAI 兼容根地址（自动拼接 /chat/completions），如 https://api.deepseek.com/v1
+    base-url: ""
+    # API Key（建议 ${DEEPSEEK_API_KEY:} 环境变量注入，勿写死），请求以 Authorization: Bearer 头发送
+    api-key: ""
+    # 模型名，如 deepseek-chat
+    model: ""
+    # 采样温度（0~1，越高越发散；润色类任务推荐 0.3~0.7）
+    temperature: 0.7
+    # HTTP 连接/读取超时（秒）
+    timeout-seconds: 30
   wecom:
     # ===== 真实企微接入配置（占位，勿在 M0 使用）=====
     # corpId / 会话存档 secret / 回调 Token / 回调 EncodingAESKey / 会话存档私钥

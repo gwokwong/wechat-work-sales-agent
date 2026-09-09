@@ -115,6 +115,10 @@ CREATE TABLE quote_request (
     quantity     INT           NOT NULL DEFAULT 1 COMMENT '数量',
     amount       DECIMAL(18,2) DEFAULT NULL COMMENT '报价金额',
     biz_ref_no   VARCHAR(128)  DEFAULT NULL COMMENT '外部业务系统单号',
+    idempotency_key VARCHAR(64) DEFAULT NULL COMMENT '幂等键（UUID，外呼以 Idempotency-Key 头携带）',
+    retry_count  INT           NOT NULL DEFAULT 0 COMMENT '已重试次数（不含首次尝试）',
+    last_error   VARCHAR(1000) DEFAULT NULL COMMENT '最近一次失败原因',
+    max_attempts INT           NOT NULL DEFAULT 3 COMMENT '允许的最大尝试次数（含首次）',
     status       VARCHAR(32)   NOT NULL DEFAULT 'CREATED' COMMENT 'CREATED/SYNCED/FAILED',
     created_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     PRIMARY KEY (id)
