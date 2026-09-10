@@ -58,6 +58,31 @@ app:
       base-url: ""
       # 调用报价系统鉴权 Key（建议环境变量注入），适配器以 X-API-Key 头发送
       api-key: ""
+  # ===== 截图工作流（DESIGN.md 截图上传 → OCR → 复用 agent 编排）=====
+  screenshot:
+    # 上传图片落盘根目录（相对应用工作目录），静态资源映射 /uploads/screenshot/** 指向此处
+    upload-dir: ./data/screenshot
+    # 话术导出文件落盘目录，静态资源映射 /uploads/export/** 指向此处
+    export-dir: ./data/export
+    # 单张图片大小上限（字节，默认 5MB）
+    max-upload-bytes: 5242880
+    # 单次批量上传识别的截图张数上限
+    max-batch-count: 9
+    # 允许的图片扩展名
+    allowed-extensions: png,jpg,jpeg,webp,bmp
+  # ===== 截图 OCR 识别 =====
+  ocr:
+    # auto=按「本机 tesseract → 外部 OCR 服务 → 占位兜底(前端手动粘贴)」顺序探测；
+    # external=强制走外部服务；off=关闭识别直接返回占位文本
+    mode: auto
+    # tesseract 可执行文件绝对路径（显式指定，不依赖后端进程启动时的 PATH 快照）
+    tesseract-path: C:/Program Files/Tesseract-OCR/tesseract.exe
+    # tesseract 语言包参数（缺中文包时可回退 eng）
+    tesseract-lang: chi_sim+eng
+    # 外部 OCR 服务根地址（POST {base-url}/ocr，json {"imageBase64":"..."}，返回 {"text":"..."}）；留空且无本机 OCR 时走占位兜底
+    external-base-url: ""
+    # 外部 OCR 服务鉴权 Key（可选，以 X-API-Key 头发送）
+    external-api-key: ""
   llm:
     # 话术生成模型开关：true=MockLLMClient（规则个性化演示，默认，无需外部依赖）；
     # 联调真实模型时置 false 并填写下方 base-url / api-key / model（建议通过环境变量注入）
@@ -73,6 +98,15 @@ app:
     # HTTP 连接/读取超时（秒）
     timeout-seconds: 30
   wecom:
+    # ---- 外发频率限制（客户级令牌桶，DESIGN.md §7.4 / §10 B1；默认关闭不影响演示）----
+    rate-limit-enabled: false
+    # 令牌桶容量：单客户可立即连续发送的条数
+    rate-limit-capacity: 5
+    # 令牌补充速率：每秒补充条数（0.05 ≈ 每 20 秒补 1 个令牌）
+    rate-limit-per-second: 0.05
+    # ---- 外发长文本分片（DESIGN.md §10 B7；企微文本消息建议上限 2048）----
+    # 单条外发最大字符数：超过则按换行边界拆分为多条顺序发送并加编号前缀
+    max-outbound-length: 2048
     # ===== 真实企微接入配置（占位，勿在 M0 使用）=====
     # corpId / 会话存档 secret / 回调 Token / 回调 EncodingAESKey / 会话存档私钥
     corp-id: YOUR_CORP_ID

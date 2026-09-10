@@ -61,6 +61,8 @@ public class ContextAssemblyService {
             sb.append("【长期画像】阶段摘要: ").append(nvl(ctx.getProfile().getStageSummary()))
                     .append(" | 需求: ").append(nvl(ctx.getProfile().getNeedsSummary()))
                     .append(" | 偏好: ").append(nvl(ctx.getProfile().getPreferredTopics()))
+                    .append(" | 预算: ").append(nvl(ctx.getProfile().getBudgetRange()))
+                    .append(" | 时间窗: ").append(nvl(ctx.getProfile().getTimeWindow()))
                     .append("\n");
         }
         if (ctx.getDeal() != null) {

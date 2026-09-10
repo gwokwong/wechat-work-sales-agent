@@ -28,13 +28,15 @@ public class StrategyService {
 
     public static final String ACTION_SEND_TEXT = "SEND_TEXT";
     public static final String ACTION_CREATE_QUOTE = "CREATE_QUOTE";
+    public static final String ACTION_HUMAN_TRANSFER = "HUMAN_TRANSFER";
 
     private final StrategyConfigRepository strategyConfigRepository;
     private final ObjectMapper objectMapper;
 
     /** JSON 文件中的策略结构（triggerKeywords 为数组） */
     record StrategyJson(String stage, String ruleName, List<String> triggerKeywords,
-                        String actionType, String templateContent, int priority, boolean enabled) {
+                        String actionType, String templateContent, int priority, boolean enabled,
+                        Integer minIntervalMinutes) {
     }
 
     /** 从 classpath JSON 装载策略配置（幂等：仅在表为空时由 DemoDataInitializer 调用） */
@@ -56,6 +58,7 @@ public class StrategyService {
                 cfg.setTemplateContent(item.templateContent());
                 cfg.setPriority(item.priority() == 0 ? 100 : item.priority());
                 cfg.setEnabled(item.enabled());
+                cfg.setMinIntervalMinutes(item.minIntervalMinutes() == null ? 0 : item.minIntervalMinutes());
                 cfg.touch();
                 strategyConfigRepository.save(cfg);
                 count++;

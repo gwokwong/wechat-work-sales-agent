@@ -83,3 +83,12 @@ app:
     # 真实映射请按「员工-客户」关系维护，或使用「企业微信客服 send_msg」等其他外发通道）
     external-to-userid:
       # wmAAAAAAAAAAAAAAAA: zhangsan
+
+    # ---- 客户群「群成员 → 外部客户」归属（群内员工发言补充上下文用）----
+    # 是否实时调用 externalcontact/groupchat/get 解析群内外部成员（需「客户联系」权限）；
+    # 失败/未启用时回落下方静态映射；群内恰 1 个外部成员才归属，多客户群自动跳过
+    room-member-live-resolve-enabled: true
+    # 静态映射兜底：roomid → 群内外部客户 external_userid 列表（示例格式）
+    room-external-members:
+      # wrROOM123:
+      #   - wmCCCCCCCCCCCCCCCC

@@ -25,6 +25,10 @@ public class AppProperties {
     private Wecom wecom = new Wecom();
     private Quote quote = new Quote();
     private Llm llm = new Llm();
+    /** 截图工作流配置（app.screenshot.*） */
+    private Screenshot screenshot = new Screenshot();
+    /** 截图 OCR 识别配置（app.ocr.*） */
+    private Ocr ocr = new Ocr();
 
     /** 真实报价系统 HTTP 适配配置（app.quote.http.*） */
     @Data
@@ -48,6 +52,44 @@ public class AppProperties {
     public static class Channel {
         /** mock / wecom */
         private String active = "mock";
+    }
+
+    /**
+     * 截图工作流配置（app.screenshot.*）。
+     * 上传目录/导出目录默认落在应用工作目录下的 ./data 内；
+     * 上传图片经 OCR（或前端手动确认文本）组装为系统消息后复用既有 agent 编排链路生成话术。
+     */
+    @Data
+    public static class Screenshot {
+        /** 上传图片落盘根目录（相对应用工作目录），静态资源映射 /uploads/screenshot/** 指向此处 */
+        private String uploadDir = "./data/screenshot";
+        /** 话术导出文件落盘目录（相对应用工作目录），静态资源映射 /uploads/export/** 指向此处 */
+        private String exportDir = "./data/export";
+        /** 上传单张图片大小上限（字节），默认 5MB */
+        private long maxUploadBytes = 5L * 1024 * 1024;
+        /** 单次批量上传识别的最多截图张数（默认 9） */
+        private int maxBatchCount = 9;
+        /** 允许的图片扩展名（小写，不含点） */
+        private List<String> allowedExtensions = new ArrayList<>(List.of("png", "jpg", "jpeg", "webp", "bmp"));
+    }
+
+    /**
+     * 截图 OCR 配置（app.ocr.*）。
+     * mode：auto（默认）按「本机 tesseract → 外部 OCR 服务 → 占位兜底」顺序探测；
+     *       external（强制走外部服务）；off（关闭识别，一律返回占位文本，由前端手动粘贴/编辑）。
+     */
+    @Data
+    public static class Ocr {
+        /** auto / external / off */
+        private String mode = "auto";
+        /** tesseract 可执行文件路径（auto 模式下探测；留空则按 PATH 中的 tesseract 探测） */
+        private String tesseractPath = "tesseract";
+        /** tesseract 语言包参数，如 chi_sim+eng；缺中文包时可回退 eng */
+        private String tesseractLang = "chi_sim+eng";
+        /** 外部 OCR 服务根地址（POST {base-url}/ocr，json {"imageBase64":"..."}，返回 {"text":"..."}） */
+        private String externalBaseUrl = "";
+        /** 外部 OCR 服务鉴权 Key（可选，以 X-API-Key 头发送） */
+        private String externalApiKey = "";
     }
 
     /** Mock 演示配置 */
@@ -144,6 +186,15 @@ public class AppProperties {
         // ---- 外发映射 ----
         /** external_userid → 企微成员 userid（message/send 的 touser）；缺失时按原值直发并告警 */
         private Map<String, String> externalToUserid = new HashMap<>();
+
+        // ---- 客户群「群成员 → 外部客户」映射（DESIGN.md §10；RoomMemberResolver 已实现实时+静态回落）----
+        /** 静态映射兜底：roomid → 群内外部客户 external_userid 列表（演示/无法调用企微 API 时使用） */
+        private Map<String, List<String>> roomExternalMembers = new HashMap<>();
+        /**
+         * 是否实时调用 externalcontact/groupchat/get 解析群内外部成员（需「客户联系」权限，
+         * 使用 app-secret 的 access_token）；失败自动回落静态映射。默认 true。
+         */
+        private boolean roomMemberLiveResolveEnabled = true;
 
         /** 解析 message/send 的 touser：优先映射表，否则原 external_userid */
         public String resolveTouser(String externalUserId) {

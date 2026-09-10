@@ -12,6 +12,7 @@ INSERT INTO strategy_config (stage, rule_name, trigger_keywords, action_type, te
 ('NEEDS_ANALYSIS', '方案阶段-兜底',       NULL, 'SEND_TEXT',    '明白，您这边关注的更多是具体落地细节，我正在整理需求清单，随后会给到实施方案建议。', 100, 1),
 ('PROPOSAL',       '提案阶段-发送方案报价','方案|报价单|正式报价|发送方案', 'CREATE_QUOTE', '您好 {{customerName}}，按我们沟通的需求，我准备了正式《产品方案与报价单》。方案亮点：……。报价单号 {{quoteReference}}，请您查收，有任何疑问随时找我！', 10, 1),
 ('PROPOSAL',       '提案阶段-兜底',       NULL, 'SEND_TEXT',    '方案我正在做最后润色，最晚明天上午前发给您，请稍等片刻。', 100, 1),
+('NEGOTIATION',    '谈判阶段-转人工',    '找人工|转人工|人工客服|经理来谈|负责人来|要投诉|投诉|客服电话|换个方式谈', 'HUMAN_TRANSFER', '（转人工：客户要求人工介入，策略仅作留痕，不对外发送）', 5, 1),
 ('NEGOTIATION',    '谈判阶段-折扣洽谈',   '折扣|优惠|便宜|再让|降价', 'SEND_TEXT', '{{customerName}} 您好，价格方面我们确实还有一定空间。如果贵司能本季度签约并按年付，我可以帮您申请额外优惠，具体幅度我这边确认后答复您。', 10, 1),
 ('NEGOTIATION',    '谈判阶段-兜底',       NULL, 'SEND_TEXT',    '收到，关于合同商务条款我会和您逐条对齐，确保后续落地顺畅。', 100, 1),
 ('WON',            '赢单-感谢与推进',     NULL, 'SEND_TEXT',    '太棒了 {{customerName}}！感谢信任，我们马上启动合同与实施流程，稍后项目经理会与您对接。', 10, 1),

@@ -24,6 +24,7 @@
     "actionType": "SEND_TEXT",
     "templateContent": "收到您的消息。为了更准确定位需求，想和您确认三个问题：1) 使用人数规模？2) 主要想解决什么问题？3) 期望的上线时间？",
     "priority": 100,
+    "minIntervalMinutes": 30,
     "enabled": true
   },
   {
@@ -64,6 +65,15 @@
   },
   {
     "stage": "NEGOTIATION",
+    "ruleName": "谈判阶段-转人工",
+    "triggerKeywords": ["找人工", "转人工", "人工客服", "经理来谈", "负责人来", "要投诉", "投诉", "客服电话", "换个方式谈"],
+    "actionType": "HUMAN_TRANSFER",
+    "templateContent": "（转人工：客户要求人工介入，策略仅作留痕，不对外发送）",
+    "priority": 5,
+    "enabled": true
+  },
+  {
+    "stage": "NEGOTIATION",
     "ruleName": "谈判阶段-折扣洽谈",
     "triggerKeywords": ["折扣", "优惠", "便宜", "再让", "降价"],
     "actionType": "SEND_TEXT",
@@ -78,6 +88,7 @@
     "actionType": "SEND_TEXT",
     "templateContent": "收到，关于合同商务条款我会和您逐条对齐，确保后续落地顺畅。",
     "priority": 100,
+    "minIntervalMinutes": 30,
     "enabled": true
   },
   {

@@ -39,6 +39,14 @@ public class CustomerProfile {
     @Column(name = "risk_notes", length = 1000)
     private String riskNotes;
 
+    /** 预算范围（如 "30-50万" / "约5万"），由画像规则提取器从对话沉淀（DESIGN.md §5.3） */
+    @Column(name = "budget_range", length = 255)
+    private String budgetRange;
+
+    /** 时间窗口（如 "Q3 / 年底前 / 2026年11月"），由画像规则提取器从对话沉淀（DESIGN.md §5.3） */
+    @Column(name = "time_window", length = 255)
+    private String timeWindow;
+
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 

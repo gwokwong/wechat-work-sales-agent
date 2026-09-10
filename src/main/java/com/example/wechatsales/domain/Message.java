@@ -45,4 +45,20 @@ public class Message {
                 .receivedAt(LocalDateTime.now())
                 .build();
     }
+
+    /**
+     * 员工在企微侧的发言（会话存档映射为 OUT）：归属到对应外部客户，
+     * 仅用于补充对话上下文与审计，不触发策略回复。
+     */
+    public static Message staffOutbound(String msgId, String contactExternalId, String content, String channelType) {
+        return Message.builder()
+                .msgId(msgId)
+                .contactExternalId(contactExternalId)
+                .direction(Direction.OUT)
+                .senderType("STAFF")
+                .content(content)
+                .channelType(channelType)
+                .receivedAt(LocalDateTime.now())
+                .build();
+    }
 }

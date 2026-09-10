@@ -48,7 +48,7 @@ public final class WeComCallbackXml {
             return Optional.empty(); // 事件类（如 change_external_contact）不产生客户会话消息
         }
         if (!"text".equalsIgnoreCase(msgType) || msgId.isEmpty() || from.isEmpty() || content.isEmpty()) {
-            return Optional.empty(); // 图片/语音/视频等 M1 留 TODO：需素材下载 + 识别/理解后转文本
+            return Optional.empty(); // 图片/语音/视频等非文本依赖素材下载 + 外部识别/理解服务转文本（外部依赖项）
         }
         return Optional.of(Message.inbound(msgId, from, content, "wecom"));
     }

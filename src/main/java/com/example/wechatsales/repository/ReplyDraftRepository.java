@@ -4,6 +4,7 @@ import com.example.wechatsales.domain.ReplyDraft;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface ReplyDraftRepository extends JpaRepository<ReplyDraft, Long> {
 
@@ -12,4 +13,6 @@ public interface ReplyDraftRepository extends JpaRepository<ReplyDraft, Long> {
     List<ReplyDraft> findAllByOrderByCreatedAtDesc();
 
     List<ReplyDraft> findByContactIdOrderByCreatedAtDesc(Long contactId);
+
+    Optional<ReplyDraft> findTopBySourceMsgIdOrderByIdDesc(String sourceMsgId);
 }

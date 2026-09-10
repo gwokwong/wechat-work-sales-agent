@@ -33,6 +33,7 @@ public class WeComApiClient {
     public static final String URL_GET_TOKEN = "https://qyapi.weixin.qq.com/cgi-bin/gettoken";
     public static final String URL_GET_CHAT_DATA = "https://qyapi.weixin.qq.com/cgi-bin/msgaudit/getchatdata";
     public static final String URL_SEND_MSG = "https://qyapi.weixin.qq.com/cgi-bin/message/send";
+    public static final String URL_GROUP_CHAT_GET = "https://qyapi.weixin.qq.com/cgi-bin/externalcontact/groupchat/get";
 
     /** 常见错误码降级说明（60011/45009/48002 等） */
     public static String describeErrCode(int errcode) {
@@ -213,6 +214,58 @@ public class WeComApiClient {
         } catch (Exception e) {
             log.error("[WeComApiClient] 消息发送请求异常 touser={}: {}", touser, e.getMessage(), e);
             return SendResult.fail("请求企微 message/send 失败: " + e.getMessage());
+        }
+    }
+
+    // ==================== 客户群详情（群成员→外部客户映射） ====================
+
+    /**
+     * 拉取客户群成员中的外部联系人 id 列表（/cgi-bin/externalcontact/groupchat/get）。
+     *
+     * <p>会话存档中群聊消息的 {@code roomid} 即客户群 chat_id；群详情返回的
+     * {@code member_list} 中 {@code type=2} 为外部联系人，其 {@code userid} 即 external_userid。
+     * 供 {@link RoomMemberResolver} 将「企业成员在群内的发言」归属到群内唯一的
+     * 外部客户（典型销售场景：1 个客户 + N 个销售同群）。</p>
+     *
+     * @param chatId 群聊 id（存档 roomid）
+     * @return 外部成员 external_userid 列表；任何失败（网络/errcode≠0/未配置）返回空列表并 WARN，不抛异常
+     */
+    public List<String> fetchRoomExternalMembers(String chatId) {
+        if (!real(wecom.getAppSecret())) {
+            log.warn("[WeComApiClient] app-secret 未配置，无法拉取客户群成员 chatId={}", chatId);
+            return List.of();
+        }
+        Map<String, Object> body = new HashMap<>();
+        body.put("chat_id", chatId);
+        body.put("need_name", 0);
+        try {
+            JsonNode json = restClient.post()
+                    .uri(URL_GROUP_CHAT_GET + "?access_token={token}", appAccessToken())
+                    .body(body)
+                    .retrieve()
+                    .body(JsonNode.class);
+            int errcode = json.path("errcode").asInt(-1);
+            if (errcode != 0) {
+                log.warn("[WeComApiClient] groupchat/get 失败 chatId={} errcode={} errmsg={}（{}）",
+                        chatId, errcode, json.path("errmsg").asText(), describeErrCode(errcode));
+                return List.of();
+            }
+            List<String> external = new ArrayList<>();
+            JsonNode members = json.path("group_chat").path("member_list");
+            if (members.isArray()) {
+                for (JsonNode m : members) {
+                    if (m.path("type").asInt(0) == 2) { // 2=外部联系人，userid 即 external_userid
+                        String id = m.path("userid").asText("");
+                        if (!id.isBlank()) {
+                            external.add(id);
+                        }
+                    }
+                }
+            }
+            return external;
+        } catch (Exception e) {
+            log.warn("[WeComApiClient] 请求 groupchat/get 异常 chatId={}: {}", chatId, e.getMessage());
+            return List.of();
         }
     }
 

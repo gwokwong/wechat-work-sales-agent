@@ -1,6 +1,17 @@
+---
+AIGC:
+    Label: "1"
+    ContentProducer: 001191440300708461136T1XGW3
+    ProduceID: 4f152940444a68ea1ec4ce3748abc308_009d864eacc111f18874525400287e28
+    ReservedCode1: 7ifYY3MM5EOUO0vE8ZnCadPw0Z9mD7i17ZtfY7xUnQBupF1p+3FUbasiK9qcP237S12kAvj1iQCkuTgDblbA8nLxC57vCr/ZnHvsDqUCB2O7xPb0ATKUjKvd112isAeJa8ahuZQKF9GL8hCSdqSX9Jo+pF/KjgNTYme0emrREpmQ2jZeMFKxSeBhVB4=
+    ContentPropagator: 001191440300708461136T1XGW3
+    PropagateID: 4f152940444a68ea1ec4ce3748abc308_009d864eacc111f18874525400287e28
+    ReservedCode2: 7ifYY3MM5EOUO0vE8ZnCadPw0Z9mD7i17ZtfY7xUnQBupF1p+3FUbasiK9qcP237S12kAvj1iQCkuTgDblbA8nLxC57vCr/ZnHvsDqUCB2O7xPb0ATKUjKvd112isAeJa8ahuZQKF9GL8hCSdqSX9Jo+pF/KjgNTYme0emrREpmQ2jZeMFKxSeBhVB4=
+---
+
 # DESIGN — 企业微信销售 Agent 设计文档
 
-> 版本：v0.1（M0 骨架演示版）　状态：设计定稿 + 骨架实现可运行
+> 版本：v0.2（M0 骨架演示版 → M1 企微接入代码完成 → 截图工作流落地）　状态：设计定稿 + 骨架实现可运行（解密/回调/拉取/系统管理/前端 sale-ui/截图工作流均已落地，真实企微物料联调待外部账号，见 §11 与 README）
 > 目标读者：本仓库开发同学、企业微信接入与安全评审同学、业务系统对接同学
 
 ---
@@ -28,7 +39,7 @@
 | C10 | 报价对接业务系统 | Should | `QuoteService` SPI + `MockQuoteService` |
 | C11 | LLM 生成润色 | Should | `LLMClient` + `MockLLMClient` |
 | C12 | 审计日志 | Should | `action_log` + REST `/api/logs` |
-| C13 | 真实会话存档解密 | Won't(M1) | `WeComChannel` / `WeComApiClient` 占位 + TODO |
+| C13 | 真实会话存档解密 | Won't(M1) | 已实现：M1 解密链路完成（见 §7.1），仅剩真实物料联调 |
 
 ### 1.3 设计边界
 
@@ -131,7 +142,7 @@
 | `stage` | 匹配的销售阶段 |
 | `triggerKeywords` | 客户消息命中任一关键词即触发（大小写不敏感）|
 | `priority` | 同阶段多条策略按 priority 降序匹配；都未命中则走 `*-fallback` 兜底策略 |
-| `actionType` | `SEND_TEXT` 纯话术 / `CREATE_QUOTE` 先调报价 SPI 再发话术 / `HUMAN_TRANSFER` 转人工（预留）|
+| `actionType` | `SEND_TEXT` 纯话术 / `CREATE_QUOTE` 先调报价 SPI 再发话术 / `HUMAN_TRANSFER` 转人工（已实现：命中即写审计 `HUMAN_TRANSFER_REQUESTED`，不生成 AI 话术、不受防骚扰间隔限制，等待人工介入）|
 | `template` | 话术模板，支持 `${quoteReference}` `${contactName}` 占位渲染 |
 | `enabled` | 是否启用 |
 
@@ -174,7 +185,7 @@ AUTO 模式（app.approval-mode=AUTO，仅测试）→ 自动 approve + 发送
 
 - 阶段跃迁：更新 `stage_summary`（如"处于方案报价沟通，对价格敏感"）。
 - 每次入站消息：抽取客户消息滚入 `needs_summary`（保留最近 5 条客户消息原文，截断单条 200 字符）；
-- 规则提取：若含价格区间数字词则补 `budget_range`（示例实现只写入 `{min,max}` 空结构 + 备注，供真实实现替换）；时间窗同理。
+- 规则提取：`ProfileRuleExtractor` 用轻量正则启发式从消息文本提取预算范围/时间窗——预算支持区间（30-50万/3到5万）与单值（预算 5 万/约为 30 万，带"预算/费用/报价"等语境词防误报）；时间窗支持季度(Q1-Q4)、月份(2026年11月底)、相对(年底/下个月/明年)、促销节点(618/双十一/双12)；命中即覆盖沉淀到 `budget_range`/`time_window`，无法可靠提取时保留空并记录原因（log），后续可替换为 LLM 提取增强。
 - 画像由服务层更新，不直接暴露写接口给通道层。
 
 ---
@@ -209,7 +220,9 @@ AUTO 模式（app.approval-mode=AUTO，仅测试）→ 自动 approve + 发送
   （M0 文档此处曾误记为 AES-256-GCM，M1 编码前已联网核对官方文档更正为 CBC/PKCS7。）
 - seq 游标持久化：`archive_seq` 表（单行 id=1，`seq_cursor` 列避免 MySQL 保留字），拉取成功后再推进。
 - 明文映射：`ArchiveMessageMapper` 仅将「文本类且可定位外部客户」映射为 IN `Message`；员工外发、
-  群聊内部成员发言（缺群成员→客户映射）、语音/图片等跳过并留 TODO。
+  群聊内部成员发言走 `RoomMemberResolver` 归属群内唯一外部客户；语音/企微消息内图片等非文本跳过
+  （转文本依赖外部语音识别/ASR 与会话存档媒体下载，见 §11 外部依赖项）。用户主动上传的「聊天截图」场景
+  已通过截图工作流本机 OCR 落地（见 §10），不依赖企微媒体下载。
 - 实现类：`crypto/ArchiveDecryptor.java`、`crypto/AesCbc.java`、`channel/WeComApiClient.java`、
   `channel/WeComArchivePuller.java`、`channel/ArchiveMessageMapper.java`、`domain/ArchiveSeqState.java`。
 
@@ -231,10 +244,10 @@ AUTO 模式（app.approval-mode=AUTO，仅测试）→ 自动 approve + 发送
   签名 = SHA1(字典序拼接 token/timestamp/nonce/encrypt) 小写 hex。
 - 注意回调重试导致的重复投递由 7.2 幂等收敛。
 
-### 7.4 频率限制（TODO 接入点）
+### 7.4 频率限制
 
-- 通道侧对每个 external_userid 做令牌桶（`wecom.rate-limits`），防止营销话术短时间轰炸；
-- 编排器发送前二次校验：目标客户最近一次外发时间距当前 > 策略级间隔（`ReplyStrategy` 预留 `minIntervalMinutes` 字段占位）。
+- 通道侧对每个 external_userid 做令牌桶（`wecom.rate-limits`），防止营销话术短时间轰炸 —— 已实现：客户级令牌桶 `RateLimitService` + `OutboundSender` 接入。
+- 编排器发送前二次校验已实现：`violatesMinInterval` 查最近一次 OUT 外发时间与当前间隔，不足策略级 `minIntervalMinutes` 则静默跳过并写审计 `STRATEGY_INTERVAL_SKIPPED`（策略 JSON/DB 均可配该字段）。
 
 ### 7.5 安全红线（真实企微）
 
@@ -281,22 +294,64 @@ public interface QuoteService {
 
 ---
 
-## 10. 可观测性与扩展 TODO（M1+）
+## 10. 截图工作流
 
+> 场景：销售手头只有聊天截图，想快速得到对应话术。该工作流独立于企微会话存档导入，用户在前端 `/sales/screenshot` 手动上传截图即可。
+
+### 10.1 链路
+
+```
+上传截图 → 逐张 OCR 识别 → 前端编辑 / 合并文本并选客户 → 提交 process → 沿用编排生成话术草稿 → 一键复制 / 导出（.txt / .docx）
+```
+
+- 接口：`POST /api/screenshot/upload`（多文件，`file` 字段，最多 `app.screenshot.max-batch-count` 张）、`POST /api/screenshot/process`、`GET /api/screenshot/drafts/{id}/export?format=txt|docx`。
+- 落盘：上传图片 → `app.screenshot.upload-dir`，导出文件 → `app.screenshot.export-dir`；均经静态映射 `/uploads/**` 提供下载 URL。
+- 模块：`screenshot/ScreenshotService`（存储 / 批量识别 / 入编排 / 导出）、`ScreenshotOcrService`（OCR 引擎路由）、`OcrMode` / `OcrResult`（模式与结果模型）、`rest/ScreenshotController`。
+
+### 10.2 编排复用（沿用 `SalesAgentOrchestrator.onMessage`）
+
+- process 不是另写一套回复逻辑，而是把确认后的聊天文本组装成一条入站消息，直接走 `SalesAgentOrchestrator.onMessage` 既有链路：幂等 → 建档 → 画像 → 阶段分类 → 策略 → 合规 → 生成 `reply_draft`，保证截图场景与企微消息场景的回复口径完全一致。
+
+### 10.3 OCR 引擎探测与模式降级
+
+- 模式：`auto`（默认）/ `external` / `off`（`app.ocr.mode`）。
+- `auto` 路由顺序：本机 tesseract CLI → 外部 OCR 服务（`app.ocr.external-base-url` + POST `/ocr`，可选 `external-api-key`）→ PLACEHOLDER 占位文本（前端手动粘贴 / 编辑）。
+- **探测与识别解耦（关键设计）**：引擎可用性由 `commandAvailable`（ProcessBuilder 运行 `tesseract --version`）独立判定并缓存，与单次图片识别结果无关。只要引擎可用，`recognizeTesseract` 一律返回 `mode=TESSERACT` 的结果——**即使某张图识别文本为空也返回 `text=""`，绝不因空结果误判引擎不可用而降级到占位**。仅当命令不可用 / 持续异常时才返回 PLACEHOLDER。线上曾踩坑：空识别与引擎探测耦合导致真实 OCR 被误关，本设计已解耦根治。
+- tesseract 用绝对路径配置：`app.ocr.tesseract-path=C:/Program Files/Tesseract-OCR/tesseract.exe`、`tesseract-lang=chi_sim+eng`；本机 Tesseract 5.4（含 chi_sim 简体中文包）验证可用。
+
+### 10.4 空文本不入链护栏
+
+- 空文本 / 纯空白识别结果**不会进入 AI 编排链路**：后端 `storeAndRecognizeAll` 对每条识别文本做 trim 判断并给出"空文本"标记；前端对空结果按 `ocr.mode` 分场景提示：
+  - `TESSERACT` + 空 → "图片中未识别到文字，可手动输入或换图"；
+  - `PLACEHOLDER` → "OCR 未就绪，已返回空识别结果，可手动输入"。
+- 未确认 / 空文本的条目不参与合并生成，防止把空文本喂给编排器产生无意义的回复。
+
+### 10.5 多图批量与导出
+
+- 多图：`storeAndRecognizeAll(List<MultipartFile>)` 逐张落盘 + 识别为结果列表返回；前端逐张展示、可选择性合并（多张文本按换行拼接为一段聊天记录）。
+- 导出：`exportDraft` 支持 `txt`（UTF-8 纯文本）/ `docx`（用 JDK 自带 `ZipOutputStream` 手写最小合法 WordprocessingML——`[Content_Types].xml + _rels/.rels + word/document.xml`，中文内容直接入 XML，零第三方依赖，兼容 Word / WPS 打开）。
+  - 选型说明：相比引入 Apache POI（重依赖、与项目现状不符）与 HTML→doc（Word 兼容性差、易被识别成网页），手写合法 OOXML 是最稳妥、可控且无新增依赖的方案；`buildDocx` 内置对 XML 特殊字符与非法控制字符的转义，避免生成损坏文件。
+
+---
+
+## 11. 可观测性与扩展 TODO（M1+）
+
+- [x] 截图工作流（上传 → OCR → 编辑合并 → 复用编排生成话术 → 复制 / 导出 txt/docx）— 已实现：见 §10；本机 Tesseract 5.4 含 chi_sim
 - [x] 企微会话存档解密实现与本地单测夹具（ArchiveDecryptor + AesCbc，RSA+AES 全链路）
 - [x] 回调控制器 + 验签 + 5s ack + 异步消息推送（WeComCallbackController + WeComChannel）
 - [x] getchatdata 增量拉取 + seq 游标持久化 + 定时任务（WeComArchivePuller + archive_seq）
 - [ ] 真实企微物料联调（等老板提供 corpId/secret/私钥/agentId 等，见 README M1 清单）
-- [ ] 通道级/客户级频率限制（令牌桶）
-- [ ] 语音转文本 / 图片 OCR 后转文本处理
-- [ ] 群聊「群成员 → 外部客户」完整映射
-- [ ] 真实 LLMClient 实现（系统提示词约束：只润色不新承诺）
-- [ ] ComplianceFilter 规则外置（词库/正则配置化）
+- [x] 通道级/客户级频率限制（令牌桶）— 已实现：客户级令牌桶 RateLimitService + OutboundSender 接入，`app.wecom.rate-limit-enabled/capacity/per-second` 可配（默认关闭不影响演示）
+- [~] 语音转文本 / 企微消息内图片转文本 — 部分落地：聊天截图图片 OCR 已通过截图工作流本机 tesseract 落地（见 §10）；会话存档内语音 / 企微媒体图片转文本仍依赖外部语音识别/ASR 与企微媒体素材下载（access_token + 媒体 API + 存储）
+- [~] 群聊「群成员 → 外部客户」完整映射 — 部分实现：RoomMemberResolver 静态映射(room-external-members) + 实时 externalcontact/groupchat/get 解析（带缓存，失败回落静态）；完整实时联调依赖企微「客户联系」权限与真实账号物料
+- [~] 真实 LLMClient 实现（系统提示词约束：只润色不新承诺）— 代码已实现 HttpLLMClient（OpenAI 兼容 chat/completions，含系统提示词约束）；真实生效需 `app.llm.mock=false` + base-url/api-key/model（外部模型账号/密钥）
+- [x] ComplianceFilter 规则外置（词库/正则配置化）— 已实现：敏感词 `app.compliance.sensitive-words`、阻断正则 `blocked-patterns`、规则名 `pattern-rule-names`（application.yml 可配，无需改代码）
 - [x] M0/M1 核心逻辑单元测试补强（stage/strategy/action/context/rest/web，JUnit5+Mockito，22 例新增）
 - [x] 真实报价 HTTP 适配器（HttpQuoteService，条件装配 + bizRefNo 回填 + FAILED 兜底，MockRestServiceServer 单测）
-- [ ] 业务系统报价/CRM SPI 重试/幂等增强（幂等键/失败重投/回调轮询确认）
-- [ ] 消息分片/长文本、图片/文件消息处理
+- [x] 业务系统报价/CRM SPI 重试/幂等增强（幂等键/失败重投/回调轮询确认）— 已实现 HttpQuoteService 幂等键（Idempotency-Key 头）+ maxAttempts 指数退避重试 + FAILED 兜底；「回调轮询确认」未实现，归真实 SPI 联调评估
+- [~] 消息分片/长文本、图片/文件消息处理 — 长文本分片已实现（OutboundSender 按换行边界拆分 + 编号前缀 + `max-outbound-length`）；图片/文件消息处理依赖企微媒体下载 API/存储/OCR，不可独立实施
 
 
 ## 定制或商务联系
 QQ：467643531
+*（内容由AI生成，仅供参考）*

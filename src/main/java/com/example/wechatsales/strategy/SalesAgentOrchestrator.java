@@ -20,6 +20,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+
 /**
  * 销售编排器（Sales Agent 核心中枢）：消费 MessageBus 上的客户消息，串联完整链路：
  *
@@ -88,6 +90,25 @@ public class SalesAgentOrchestrator implements MessageListener {
         // 2) 客户建档（首次出现自动建 contact）
         Contact contact = contextAssemblyService.requireContactByExternalId(message.getContactExternalId());
 
+        // 2.5) OUT（员工在企微侧的发言，经群聊/单聊存档映射而来）：仅落库补充对话上下文，
+        //      不触发分类/策略/草稿，避免把员工消息当客户消息回复
+        if (message.getDirection() == Direction.OUT) {
+            MessageLog staffMsg = new MessageLog();
+            staffMsg.setMsgId(message.getMsgId());
+            staffMsg.setContactId(contact.getId());
+            staffMsg.setDirection(Direction.OUT.name());
+            staffMsg.setSenderType(message.getSenderType() == null ? "STAFF" : message.getSenderType());
+            staffMsg.setContent(message.getContent());
+            staffMsg.setMsgType("text");
+            staffMsg.setChannelType(message.getChannelType());
+            staffMsg.setProcessed(Boolean.TRUE);
+            staffMsg.touch();
+            messageLogRepository.save(staffMsg);
+            actionLogger.log(contact.getId(), "STAFF_MESSAGE_ARCHIVED",
+                    "msgId=" + message.getMsgId() + " 内容=" + truncate(message.getContent()));
+            return;
+        }
+
         // 3) 客户消息落库（先落库保证审计完整）
         MessageLog inbound = new MessageLog();
         inbound.setMsgId(message.getMsgId());
@@ -120,6 +141,26 @@ public class SalesAgentOrchestrator implements MessageListener {
         if (rule == null) {
             log.info("[Orchestrator] 客户 {} 当前阶段 {} 无可用回复策略，等待人工介入",
                     contact.getName(), deal.getStage());
+            return;
+        }
+
+        // 8.5) HUMAN_TRANSFER 转人工：客户主动要求/投诉等场景交回人工，不生成 AI 话术、
+        //      不受防骚扰间隔限制，仅写审计标记与日志即结束（由人工在管理端介入）
+        if (StrategyService.ACTION_HUMAN_TRANSFER.equals(rule.getActionType())) {
+            actionLogger.log(contact.getId(), "HUMAN_TRANSFER_REQUESTED",
+                    "strategy=" + rule.getRuleName() + " stage=" + deal.getStage().name()
+                            + " 触发消息=" + truncate(message.getContent()));
+            log.info("[Orchestrator] 客户 {} 命中转人工策略[{}]，已记录审计标记，等待人工介入",
+                    contact.getName(), rule.getRuleName());
+            return;
+        }
+
+        // 8.6) 策略级最小发送间隔二次校验（DESIGN.md §7.4）：距最近一次外发不足间隔则静默跳过，
+        //      不生成草稿、不调报价，避免营销话术短时间轰炸同一客户
+        if (violatesMinInterval(contact.getId(), rule)) {
+            actionLogger.log(contact.getId(), "STRATEGY_INTERVAL_SKIPPED",
+                    "strategy=" + rule.getRuleName() + " minIntervalMinutes=" + rule.getMinIntervalMinutes()
+                            + " 触发消息=" + truncate(message.getContent()));
             return;
         }
 
@@ -172,5 +213,25 @@ public class SalesAgentOrchestrator implements MessageListener {
         } else {
             log.info("[Orchestrator] 草稿 draftId={} 进入人工审批队列（PENDING）", draft.getId());
         }
+    }
+
+    /**
+     * 策略级最小发送间隔校验：minIntervalMinutes>0 且该客户最近一次外发
+     * （任意通道/人工或 Agent）距今不足间隔时返回 true。
+     */
+    private boolean violatesMinInterval(Long contactId, StrategyConfig rule) {
+        Integer minutes = rule.getMinIntervalMinutes();
+        if (minutes == null || minutes <= 0) {
+            return false;
+        }
+        return messageLogRepository
+                .findTop1ByContactIdAndDirectionOrderByCreatedAtDesc(contactId, Direction.OUT.name())
+                .map(MessageLog::getCreatedAt)
+                .map(last -> last.plusMinutes(minutes).isAfter(LocalDateTime.now()))
+                .orElse(false);
+    }
+
+    private String truncate(String s) {
+        return s == null ? "" : (s.length() <= 100 ? s : s.substring(0, 100) + "...");
     }
 }

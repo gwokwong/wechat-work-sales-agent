@@ -46,6 +46,13 @@ public class StrategyConfig {
     @Column(nullable = false)
     private Boolean enabled = Boolean.TRUE;
 
+    /**
+     * 策略级最小发送间隔（分钟）：距该客户最近一次外发不足该间隔时，
+     * 编排器跳过本条自动回复（防骚扰二次校验，DESIGN.md §7.4）。0 = 不限制。
+     */
+    @Column(name = "min_interval_minutes", nullable = false)
+    private Integer minIntervalMinutes = 0;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 

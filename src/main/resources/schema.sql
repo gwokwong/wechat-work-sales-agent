@@ -29,6 +29,8 @@ CREATE TABLE customer_profile (
     needs_summary    VARCHAR(2000) DEFAULT NULL COMMENT '客户需求摘要',
     preferred_topics VARCHAR(1000) DEFAULT NULL COMMENT '偏好话题/关注点',
     risk_notes       VARCHAR(1000) DEFAULT NULL COMMENT '风险备注（合规、比价、异议）',
+    budget_range     VARCHAR(255)  DEFAULT NULL COMMENT '预算范围（如 30-50万，由规则提取器沉淀，DESIGN.md §5.3）',
+    time_window      VARCHAR(255)  DEFAULT NULL COMMENT '时间窗口（如 Q3/年底前/2026年11月，由规则提取器沉淀，DESIGN.md §5.3）',
     updated_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_customer_profile_contact (contact_id)
@@ -101,6 +103,7 @@ CREATE TABLE strategy_config (
     action_type      VARCHAR(32)   NOT NULL DEFAULT 'SEND_TEXT' COMMENT '动作类型',
     template_content VARCHAR(2000) NOT NULL COMMENT '话术模板（支持 {{customerName}} 等占位符）',
     priority         INT           NOT NULL DEFAULT 100 COMMENT '优先级（数字小先命中）',
+    min_interval_minutes INT       NOT NULL DEFAULT 0 COMMENT '策略级最小发送间隔（分钟，0=不限制）',
     enabled          TINYINT(1)    NOT NULL DEFAULT 1 COMMENT '是否启用',
     created_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     PRIMARY KEY (id)
@@ -147,3 +150,93 @@ CREATE TABLE archive_seq (
     updated_at DATETIME     DEFAULT NULL COMMENT '更新时间',
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='会话存档拉取游标';
+
+-- =====================================================================
+-- 系统管理域（sale-ui 系统管理模块：用户/角色/菜单/权限）
+-- =====================================================================
+
+-- 系统用户（注册 / 登录 / 用户列表）
+DROP TABLE IF EXISTS sys_user;
+CREATE TABLE sys_user (
+    id          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    user_name   VARCHAR(50)  NOT NULL COMMENT '登录名',
+    password    VARCHAR(128) NOT NULL COMMENT '密码 SHA-256（十六进制）',
+    nick_name   VARCHAR(50)  DEFAULT NULL COMMENT '昵称',
+    gender      VARCHAR(8)   DEFAULT NULL COMMENT '性别',
+    phone       VARCHAR(20)  DEFAULT NULL COMMENT '手机号',
+    email       VARCHAR(100) DEFAULT NULL COMMENT '邮箱',
+    avatar      VARCHAR(255) DEFAULT NULL COMMENT '头像',
+    status      VARCHAR(8)   DEFAULT '1' COMMENT '状态 1在线 2离线 3异常 4注销',
+    create_by   VARCHAR(50)  DEFAULT NULL COMMENT '创建人',
+    update_by   VARCHAR(50)  DEFAULT NULL COMMENT '更新人',
+    create_time DATETIME     DEFAULT NULL COMMENT '创建时间',
+    update_time DATETIME     DEFAULT NULL COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_sys_user_name (user_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统用户';
+
+-- 用户-角色关联（对应实体 @ElementCollection sys_user_roles）
+DROP TABLE IF EXISTS sys_user_roles;
+CREATE TABLE sys_user_roles (
+    user_id   BIGINT      NOT NULL COMMENT 'sys_user.id',
+    role_code VARCHAR(50) NOT NULL COMMENT '角色编码',
+    KEY idx_sys_user_roles_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户角色关联';
+
+-- 系统角色
+DROP TABLE IF EXISTS sys_role;
+CREATE TABLE sys_role (
+    role_id     BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    role_name   VARCHAR(50)  NOT NULL COMMENT '角色名称',
+    role_code   VARCHAR(50)  NOT NULL COMMENT '角色编码',
+    description VARCHAR(200) DEFAULT NULL COMMENT '描述',
+    enabled     TINYINT(1)   NOT NULL DEFAULT 1 COMMENT '是否启用',
+    create_time DATETIME     DEFAULT NULL COMMENT '创建时间',
+    update_time DATETIME     DEFAULT NULL COMMENT '更新时间',
+    PRIMARY KEY (role_id),
+    UNIQUE KEY uk_sys_role_code (role_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统角色';
+
+-- 系统菜单 / 权限按钮（menu_type=menu 菜单，menu_type=button 权限按钮）
+DROP TABLE IF EXISTS sys_menu;
+CREATE TABLE sys_menu (
+    id             BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+    parent_id      BIGINT        NOT NULL DEFAULT 0 COMMENT '父菜单 id，顶级为 0',
+    name           VARCHAR(100)  NOT NULL COMMENT '路由 name（权限树 node-key，唯一）',
+    path           VARCHAR(200)  DEFAULT NULL COMMENT '路由地址',
+    component      VARCHAR(200)  DEFAULT NULL COMMENT '组件路径',
+    title          VARCHAR(100)  DEFAULT NULL COMMENT 'meta.title',
+    icon           VARCHAR(100)  DEFAULT NULL COMMENT 'meta.icon',
+    sort           INT           NOT NULL DEFAULT 1 COMMENT '排序',
+    menu_type      VARCHAR(10)   DEFAULT 'menu' COMMENT 'menu / button',
+    auth_mark      VARCHAR(100)  DEFAULT NULL COMMENT '权限按钮标识（button）',
+    is_auth_button TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '是否权限按钮',
+    is_enable      TINYINT(1)    NOT NULL DEFAULT 1 COMMENT '是否启用',
+    is_menu        TINYINT(1)    NOT NULL DEFAULT 1 COMMENT '是否菜单',
+    keep_alive     TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '页面缓存',
+    is_hide        TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '隐藏菜单',
+    is_hide_tab    TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '隐藏标签',
+    is_iframe      TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '是否内嵌',
+    link           VARCHAR(300)  DEFAULT NULL COMMENT '外部链接',
+    show_badge     TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '显示徽章',
+    show_text_badge VARCHAR(50)  DEFAULT NULL COMMENT '文本徽章',
+    fixed_tab      TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '固定标签',
+    active_path    VARCHAR(200)  DEFAULT NULL COMMENT '激活路径',
+    is_full_page   TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '全屏页面',
+    roles          VARCHAR(200)  DEFAULT NULL COMMENT '前端权限模式角色标识（逗号分隔）',
+    auth_sort      INT           DEFAULT 1 COMMENT '权限按钮排序（button）',
+    create_time    DATETIME      DEFAULT NULL COMMENT '创建时间',
+    update_time    DATETIME      DEFAULT NULL COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_sys_menu_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统菜单/权限按钮';
+
+-- 角色-菜单权限关联（permission_key 为前端权限树 node-key：菜单 name 或 菜单name_authMark）
+DROP TABLE IF EXISTS sys_role_permission;
+CREATE TABLE sys_role_permission (
+    id             BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    role_id        BIGINT       NOT NULL COMMENT 'sys_role.role_id',
+    permission_key VARCHAR(200) NOT NULL COMMENT '权限键',
+    PRIMARY KEY (id),
+    KEY idx_sys_role_permission_role (role_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='角色权限关联';
