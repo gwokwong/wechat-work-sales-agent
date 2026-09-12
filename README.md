@@ -1,14 +1,3 @@
----
-AIGC:
-    Label: "1"
-    ContentProducer: 001191440300708461136T1XGW3
-    ProduceID: 4f152940444a68ea1ec4ce3748abc308_ffb92f62acc011f18f50525400aeaaa3
-    ReservedCode1: WbfvgQKOjTpj/PuB68zH6zloc5i/ipQpwr2iPKQYoJ7yvKyicVdI+prBcGQhibP3R5GHeNJxJv7jWHTCZA6mAi7POzXsRg6thxkIw/Ei37kqqiZuQMQpYE61hOmVqGlMNyamLTY26xmWYrQl5OROC3D1Lvmk8oYwXfR7yeSzJAeWgyacE1GleOWL/u8=
-    ContentPropagator: 001191440300708461136T1XGW3
-    PropagateID: 4f152940444a68ea1ec4ce3748abc308_ffb92f62acc011f18f50525400aeaaa3
-    ReservedCode2: WbfvgQKOjTpj/PuB68zH6zloc5i/ipQpwr2iPKQYoJ7yvKyicVdI+prBcGQhibP3R5GHeNJxJv7jWHTCZA6mAi7POzXsRg6thxkIw/Ei37kqqiZuQMQpYE61hOmVqGlMNyamLTY26xmWYrQl5OROC3D1Lvmk8oYwXfR7yeSzJAeWgyacE1GleOWL/u8=
----
-
 # 企业微信销售 Agent（WeChat Sales Agent）
 
 > **这个项目帮你把企微销售流程自动化，让 AI 替你跟进客户。**
@@ -394,4 +383,3 @@ wechat-work-sales-agent/
 
 ## 定制或商务联系 
 QQ：467643531
-*（内容由AI生成，仅供参考）*
